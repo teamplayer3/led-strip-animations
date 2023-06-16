@@ -7,6 +7,8 @@ use keyframe::CanTween;
 use num_traits::Zero;
 use rgb::RGB8;
 
+use crate::util::{max_3, min_3};
+
 const MAX_RGB_VALUE: u8 = 255;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -353,26 +355,6 @@ fn hsv_to_rgb(h: u16, s: u8, v: u8) -> (u8, u8, u8) {
     let b = ((b + m) * 255f32) as u8;
 
     (r, g, b)
-}
-
-fn max_3(a: f32, b: f32, c: f32) -> f32 {
-    if a > b && a > c {
-        a
-    } else if c > a && c > b {
-        c
-    } else {
-        b
-    }
-}
-
-fn min_3(a: f32, b: f32, c: f32) -> f32 {
-    if a <= b && a <= c {
-        a
-    } else if c <= a && c <= b {
-        c
-    } else {
-        b
-    }
 }
 
 #[cfg(test)]
