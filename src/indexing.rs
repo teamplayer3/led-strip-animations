@@ -357,7 +357,7 @@ pub fn divided_indexing<I: Clone>(
     uneven_behavior: UnevenBehavior,
 ) -> (HalfIndexed<I>, HalfIndexed<I>) {
     let lower_half = HalfIndexed(indexer.clone(), true, uneven_behavior);
-    let upper_half = HalfIndexed(indexer.clone(), false, uneven_behavior);
+    let upper_half = HalfIndexed(indexer, false, uneven_behavior);
     (lower_half, upper_half)
 }
 
