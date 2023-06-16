@@ -14,8 +14,8 @@ pub enum MappingError {
 
 pub trait Indexing {
     type OutputIndex: ExactSizeIterator<Item = Index>;
-    fn map(&self, index: Index) -> Result<Self::OutputIndex, MappingError>;
-    fn map_len(&self) -> usize;
+    fn index(&self, index: Index) -> Result<Self::OutputIndex, MappingError>;
+    fn len(&self) -> usize;
 }
 
 pub trait IndexingExt: Indexing {
@@ -79,13 +79,13 @@ impl<I> ReversedIndexed<I> {
 impl<I: Indexing> Indexing for ReversedIndexed<I> {
     type OutputIndex = <I as Indexing>::OutputIndex;
 
-    fn map(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
+    fn index(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
         self.0
-            .map(Index::try_from(self.0.map_len()).unwrap() - index - 1)
+            .index(Index::try_from(self.0.len()).unwrap() - index - 1)
     }
 
-    fn map_len(&self) -> usize {
-        self.0.map_len()
+    fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
@@ -105,12 +105,12 @@ impl<I> EveryNthIndexed<I> {
 impl<I: Indexing> Indexing for EveryNthIndexed<I> {
     type OutputIndex = <I as Indexing>::OutputIndex;
 
-    fn map(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
-        self.0.map(index * Index::try_from(self.1).unwrap())
+    fn index(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
+        self.0.index(index * Index::try_from(self.1).unwrap())
     }
 
-    fn map_len(&self) -> usize {
-        self.0.map_len() / self.1
+    fn len(&self) -> usize {
+        self.0.len() / self.1
     }
 }
 
@@ -128,15 +128,15 @@ pub fn every_nth_indexing<I>(indexer: I, nth: usize) -> EveryNthIndexed<I> {
 /// let indexes = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 /// let circle = CircularIndexed::new(&indexes, 2);
 ///
-/// assert_eq!(*circle.map(0).unwrap(), 2);
-/// assert_eq!(*circle.map(8).unwrap(), 1);
+/// assert_eq!(*circle.index(0).unwrap(), 2);
+/// assert_eq!(*circle.index(8).unwrap(), 1);
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct CircularIndexed<I>(I, isize);
 
 impl<I: Indexing> CircularIndexed<I> {
     pub fn new(indexer: I, offset: isize) -> Self {
-        assert!(abs(offset) < indexer.map_len() as isize);
+        assert!(abs(offset) < indexer.len() as isize);
         Self(indexer, offset)
     }
 }
@@ -144,8 +144,8 @@ impl<I: Indexing> CircularIndexed<I> {
 impl<I: Indexing> Indexing for CircularIndexed<I> {
     type OutputIndex = <I as Indexing>::OutputIndex;
 
-    fn map(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
-        let len = Index::try_from(self.0.map_len()).unwrap();
+    fn index(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
+        let len = Index::try_from(self.0.len()).unwrap();
         if index >= len {
             return Err(MappingError::IndexOutOfBounds);
         }
@@ -157,11 +157,11 @@ impl<I: Indexing> Indexing for CircularIndexed<I> {
             Index::try_from((index as isize) + self.1).unwrap() % len
         };
 
-        self.0.map(index)
+        self.0.index(index)
     }
 
-    fn map_len(&self) -> usize {
-        self.0.map_len()
+    fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
@@ -195,9 +195,9 @@ impl<I: Indexing> BoundedIndexed<I> {
     /// let indexes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
     /// let bounded = BoundedIndexed::from_range(&indexes, 2..7);
     ///
-    /// assert_eq!(bounded.map_len(), 5);
-    /// assert_eq!(*bounded.map(0).unwrap(), 2);
-    /// assert_eq!(*bounded.map(4).unwrap(), 6);
+    /// assert_eq!(bounded.len(), 5);
+    /// assert_eq!(*bounded.index(0).unwrap(), 2);
+    /// assert_eq!(*bounded.index(4).unwrap(), 6);
     /// ```
     pub fn from_range<R: RangeBounds<LedId>>(indexer: I, range: R) -> Self {
         Self(
@@ -215,9 +215,9 @@ impl<I: Indexing> BoundedIndexed<I> {
     /// let indexes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
     /// let bounded = BoundedIndexed::from_bounds(&indexes, Bound::Absolute(2), Bound::Relative(2));
     ///
-    /// assert_eq!(bounded.map_len(), 6);
-    /// assert_eq!(*bounded.map(0).unwrap(), 2);
-    /// assert_eq!(*bounded.map(5).unwrap(), 7);
+    /// assert_eq!(bounded.len(), 6);
+    /// assert_eq!(*bounded.index(0).unwrap(), 2);
+    /// assert_eq!(*bounded.index(5).unwrap(), 7);
     /// ```
     pub fn from_bounds(indexer: I, front_bound: Bound, end_bound: Bound) -> Self {
         Self(indexer, front_bound, end_bound)
@@ -234,7 +234,7 @@ impl<I: Indexing> BoundedIndexed<I> {
         match self.2 {
             Bound::None => 0,
             Bound::Relative(o) => o,
-            Bound::Absolute(o) => self.0.map_len() - o - 1,
+            Bound::Absolute(o) => self.0.len() - o - 1,
         }
     }
 }
@@ -251,18 +251,18 @@ fn core_bounds_to_bounds(core_bound: core::ops::Bound<&LedId>, start: bool) -> B
 impl<I: Indexing> Indexing for BoundedIndexed<I> {
     type OutputIndex = <I as Indexing>::OutputIndex;
 
-    fn map(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
-        if index >= Index::try_from(self.map_len()).map_err(|_| MappingError::IndexOutOfBounds)? {
+    fn index(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
+        if index >= Index::try_from(self.len()).map_err(|_| MappingError::IndexOutOfBounds)? {
             return Err(MappingError::NotInMappingRange);
         }
         self.0
-            .map(index + Index::try_from(self.front_off()).unwrap())
+            .index(index + Index::try_from(self.front_off()).unwrap())
     }
 
-    fn map_len(&self) -> usize {
+    fn len(&self) -> usize {
         let front_off = self.front_off();
         let end_off = self.end_off();
-        self.0.map_len() - front_off - end_off
+        self.0.len() - front_off - end_off
     }
 }
 
@@ -289,23 +289,23 @@ impl<I> SplitMirroredIndexed<I> {
 impl<I: Indexing<OutputIndex = SingleIndexed>> Indexing for SplitMirroredIndexed<I> {
     type OutputIndex = ManyIndexed<2>;
 
-    fn map(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
-        let own_len = Index::try_from(self.map_len()).unwrap();
+    fn index(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
+        let own_len = Index::try_from(self.len()).unwrap();
         if index >= own_len {
             return Err(MappingError::NotInMappingRange);
         }
 
         let front_index = index;
-        let back_index = Index::try_from(self.0.map_len()).unwrap() - index - 1;
+        let back_index = Index::try_from(self.0.len()).unwrap() - index - 1;
 
         Ok(ManyIndexed::new([
-            *self.0.map(front_index)?,
-            *self.0.map(back_index)?,
+            *self.0.index(front_index)?,
+            *self.0.index(back_index)?,
         ]))
     }
 
-    fn map_len(&self) -> usize {
-        let indexed_len = self.0.map_len();
+    fn len(&self) -> usize {
+        let indexed_len = self.0.len();
         if indexed_len % 2 != 0 {
             match self.1 {
                 UnevenBehavior::Exclude => indexed_len / 2,
@@ -324,30 +324,31 @@ pub struct HalfIndexed<I>(I, bool, UnevenBehavior);
 impl<I: Indexing> Indexing for HalfIndexed<I> {
     type OutputIndex = <I as Indexing>::OutputIndex;
 
-    fn map(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
+    fn index(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
         if self.1 {
-            self.0.map(index)
+            self.0.index(index)
         } else {
             self.0
-                .map(index + Index::try_from(self.0.map_len() - self.map_len()).unwrap())
+                .index(index + Index::try_from(self.0.len() - self.len()).unwrap())
         }
     }
 
-    fn map_len(&self) -> usize {
-        if self.0.map_len() % 2 != 0 {
+    fn len(&self) -> usize {
+        let inner_len = self.0.len();
+        if inner_len % 2 != 0 {
             if self.1 {
                 match self.2 {
-                    UnevenBehavior::Exclude | UnevenBehavior::ToUpper => self.0.map_len() / 2,
-                    UnevenBehavior::ToLower => self.0.map_len() / 2 + 1,
+                    UnevenBehavior::Exclude | UnevenBehavior::ToUpper => inner_len / 2,
+                    UnevenBehavior::ToLower => inner_len / 2 + 1,
                 }
             } else {
                 match self.2 {
-                    UnevenBehavior::Exclude | UnevenBehavior::ToLower => self.0.map_len() / 2,
-                    UnevenBehavior::ToUpper => self.0.map_len() / 2 + 1,
+                    UnevenBehavior::Exclude | UnevenBehavior::ToLower => inner_len / 2,
+                    UnevenBehavior::ToUpper => inner_len / 2 + 1,
                 }
             }
         } else {
-            self.0.map_len() / 2
+            inner_len / 2
         }
     }
 }
@@ -439,7 +440,7 @@ impl ExactSizeIterator for SingleIndexed {
 impl Indexing for Range<u16> {
     type OutputIndex = SingleIndexed;
 
-    fn map(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
+    fn index(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
         let idx_mapped = self
             .start
             .checked_add(index)
@@ -451,44 +452,44 @@ impl Indexing for Range<u16> {
         Ok(SingleIndexed::new(idx_mapped))
     }
 
-    fn map_len(&self) -> usize {
-        self.len()
+    fn len(&self) -> usize {
+        ExactSizeIterator::len(self)
     }
 }
 
 impl Indexing for &[LedId] {
     type OutputIndex = SingleIndexed;
 
-    fn map(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
+    fn index(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
         Ok(SingleIndexed::new(self[usize::from(index)]))
     }
 
-    fn map_len(&self) -> usize {
-        self.len()
+    fn len(&self) -> usize {
+        self.deref().len()
     }
 }
 
 impl<const N: usize> Indexing for &[LedId; N] {
     type OutputIndex = SingleIndexed;
 
-    fn map(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
+    fn index(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
         Ok(SingleIndexed::new(self[usize::from(index)]))
     }
 
-    fn map_len(&self) -> usize {
-        self.len()
+    fn len(&self) -> usize {
+        self.as_slice().len()
     }
 }
 
 impl<const N: usize> Indexing for [LedId; N] {
     type OutputIndex = SingleIndexed;
 
-    fn map(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
+    fn index(&self, index: Index) -> Result<Self::OutputIndex, MappingError> {
         Ok(SingleIndexed::new(self[usize::from(index)]))
     }
 
-    fn map_len(&self) -> usize {
-        self.len()
+    fn len(&self) -> usize {
+        self.as_slice().len()
     }
 }
 
@@ -505,30 +506,30 @@ mod test {
 
         let bounded = BoundedIndexed::from_bounds(&indexed, Bound::None, Bound::Relative(2));
 
-        assert_eq!(bounded.map_len(), 7);
-        assert_eq!(*bounded.map(0).unwrap(), 0);
-        assert_eq!(*bounded.map(6).unwrap(), 6);
-        assert_matches!(bounded.map(7), Err(MappingError::NotInMappingRange));
+        assert_eq!(bounded.len(), 7);
+        assert_eq!(*bounded.index(0).unwrap(), 0);
+        assert_eq!(*bounded.index(6).unwrap(), 6);
+        assert_matches!(bounded.index(7), Err(MappingError::NotInMappingRange));
 
         let bounded = BoundedIndexed::from_bounds(&indexed, Bound::Absolute(2), Bound::Relative(2));
 
-        assert_eq!(bounded.map_len(), 5);
-        assert_eq!(*bounded.map(0).unwrap(), 2);
-        assert_eq!(*bounded.map(4).unwrap(), 6);
-        assert_matches!(bounded.map(5), Err(MappingError::NotInMappingRange));
+        assert_eq!(bounded.len(), 5);
+        assert_eq!(*bounded.index(0).unwrap(), 2);
+        assert_eq!(*bounded.index(4).unwrap(), 6);
+        assert_matches!(bounded.index(5), Err(MappingError::NotInMappingRange));
 
         let bounded = BoundedIndexed::from_bounds(&indexed, Bound::Absolute(2), Bound::Absolute(4));
 
-        assert_eq!(bounded.map_len(), 3);
-        assert_eq!(*bounded.map(0).unwrap(), 2);
-        assert_eq!(*bounded.map(2).unwrap(), 4);
-        assert_matches!(bounded.map(5), Err(MappingError::NotInMappingRange));
+        assert_eq!(bounded.len(), 3);
+        assert_eq!(*bounded.index(0).unwrap(), 2);
+        assert_eq!(*bounded.index(2).unwrap(), 4);
+        assert_matches!(bounded.index(5), Err(MappingError::NotInMappingRange));
 
         let bounded = BoundedIndexed::from_range(&indexed, 2..7);
-        assert_eq!(bounded.map_len(), 5);
-        assert_eq!(*bounded.map(0).unwrap(), 2);
-        assert_eq!(*bounded.map(4).unwrap(), 6);
-        assert_matches!(bounded.map(5), Err(MappingError::NotInMappingRange));
+        assert_eq!(bounded.len(), 5);
+        assert_eq!(*bounded.index(0).unwrap(), 2);
+        assert_eq!(*bounded.index(4).unwrap(), 6);
+        assert_matches!(bounded.index(5), Err(MappingError::NotInMappingRange));
     }
 
     #[test]
@@ -536,41 +537,41 @@ mod test {
         let indexed = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let split = SplitMirroredIndexed::new(&indexed, UnevenBehavior::Exclude);
 
-        assert_eq!(split.map_len(), 5);
-        let mut first_indexes = split.map(0).unwrap();
+        assert_eq!(split.len(), 5);
+        let mut first_indexes = split.index(0).unwrap();
         assert_eq!(first_indexes.len(), 2);
         assert_eq!(first_indexes.next().unwrap(), 0);
         assert_eq!(first_indexes.next().unwrap(), 9);
         assert_eq!(first_indexes.next(), None);
 
-        let mut last_indexes = split.map(4).unwrap();
+        let mut last_indexes = split.index(4).unwrap();
         assert_eq!(last_indexes.next().unwrap(), 4);
         assert_eq!(last_indexes.next().unwrap(), 5);
 
         let indexed = [0, 1, 2, 3, 4, 5, 6, 7, 8];
         let split_uneven = SplitMirroredIndexed::new(&indexed, UnevenBehavior::Exclude);
 
-        assert_eq!(split_uneven.map_len(), 4);
+        assert_eq!(split_uneven.len(), 4);
 
-        let mut first_indexes = split_uneven.map(0).unwrap();
+        let mut first_indexes = split_uneven.index(0).unwrap();
         assert_eq!(first_indexes.next().unwrap(), 0);
         assert_eq!(first_indexes.next().unwrap(), 8);
 
-        let mut last_indexes = split_uneven.map(3).unwrap();
+        let mut last_indexes = split_uneven.index(3).unwrap();
         assert_eq!(last_indexes.next().unwrap(), 3);
         assert_eq!(last_indexes.next().unwrap(), 5);
 
-        assert_matches!(split_uneven.map(4), Err(MappingError::NotInMappingRange));
+        assert_matches!(split_uneven.index(4), Err(MappingError::NotInMappingRange));
 
         let split_uneven = SplitMirroredIndexed::new(&indexed, UnevenBehavior::ToLower);
 
-        let mut last_indexes = split_uneven.map(4).unwrap();
+        let mut last_indexes = split_uneven.index(4).unwrap();
         assert_eq!(last_indexes.next().unwrap(), 4);
         assert_eq!(last_indexes.next().unwrap(), 4);
 
         let split_uneven = SplitMirroredIndexed::new(&indexed, UnevenBehavior::ToUpper);
 
-        let mut last_indexes = split_uneven.map(4).unwrap();
+        let mut last_indexes = split_uneven.index(4).unwrap();
         assert_eq!(last_indexes.next().unwrap(), 4);
         assert_eq!(last_indexes.next().unwrap(), 4);
     }
@@ -581,35 +582,35 @@ mod test {
 
         let (h1, h2) = indexed.split_into_half(UnevenBehavior::Exclude);
 
-        assert_eq!(h1.map_len(), 5);
-        assert_eq!(h2.map_len(), 5);
+        assert_eq!(h1.len(), 5);
+        assert_eq!(h2.len(), 5);
 
         let h1_mirrored = h1.split_mirrored(UnevenBehavior::ToLower);
         let h2_reversed = h2.reversed();
 
-        assert_eq!(h1_mirrored.map_len(), 3);
-        assert_eq!(h2_reversed.map_len(), 5);
+        assert_eq!(h1_mirrored.len(), 3);
+        assert_eq!(h2_reversed.len(), 5);
 
-        let mut h1_mirrored_first = h1_mirrored.map(0).unwrap();
+        let mut h1_mirrored_first = h1_mirrored.index(0).unwrap();
         assert_eq!(h1_mirrored_first.next().unwrap(), 0);
         assert_eq!(h1_mirrored_first.next().unwrap(), 4);
 
-        let mut h1_mirrored_last = h1_mirrored.map(2).unwrap();
+        let mut h1_mirrored_last = h1_mirrored.index(2).unwrap();
         assert_eq!(h1_mirrored_last.next().unwrap(), 2);
         assert_eq!(h1_mirrored_last.next().unwrap(), 2);
 
         let h1_mirrored_reversed = h1_mirrored.reversed();
 
-        let mut h1_mirrored_reversed_first = h1_mirrored_reversed.map(0).unwrap();
+        let mut h1_mirrored_reversed_first = h1_mirrored_reversed.index(0).unwrap();
         assert_eq!(h1_mirrored_reversed_first.next().unwrap(), 2);
         assert_eq!(h1_mirrored_reversed_first.next().unwrap(), 2);
 
-        let mut h1_mirrored_reversed_last = h1_mirrored_reversed.map(2).unwrap();
+        let mut h1_mirrored_reversed_last = h1_mirrored_reversed.index(2).unwrap();
         assert_eq!(h1_mirrored_reversed_last.next().unwrap(), 0);
         assert_eq!(h1_mirrored_reversed_last.next().unwrap(), 4);
 
-        assert_eq!(*h2_reversed.map(0).unwrap(), 9);
-        assert_eq!(*h2_reversed.map(4).unwrap(), 5);
+        assert_eq!(*h2_reversed.index(0).unwrap(), 9);
+        assert_eq!(*h2_reversed.index(4).unwrap(), 5);
     }
 
     #[test]
@@ -617,12 +618,12 @@ mod test {
         let indexes = [0, 1, 2, 3, 4, 5, 6, 7, 8];
         let circle = CircularIndexed::new(&indexes, 2);
 
-        assert_eq!(*circle.map(0).unwrap(), 2);
-        assert_eq!(*circle.map(8).unwrap(), 1);
+        assert_eq!(*circle.index(0).unwrap(), 2);
+        assert_eq!(*circle.index(8).unwrap(), 1);
 
         let circle = CircularIndexed::new(&indexes, -2);
 
-        assert_eq!(*circle.map(0).unwrap(), 7);
-        assert_eq!(*circle.map(8).unwrap(), 6);
+        assert_eq!(*circle.index(0).unwrap(), 7);
+        assert_eq!(*circle.index(8).unwrap(), 6);
     }
 }
