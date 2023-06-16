@@ -12,6 +12,7 @@ pub enum MappingError {
     IndexOutOfBounds,
 }
 
+#[allow(clippy::len_without_is_empty)]
 pub trait Indexing {
     type OutputIndex: ExactSizeIterator<Item = Index>;
     fn index(&self, index: Index) -> Result<Self::OutputIndex, MappingError>;
