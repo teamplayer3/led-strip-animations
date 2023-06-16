@@ -5,9 +5,17 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["alloc"]
+alloc = []
+
 [dependencies]
 num = "0.4"
 num-traits = "0.2"
-assert_matches = "1.5"
 rgb = "0.8"
 keyframe = "1.1"
+
+[dev-dependencies]
+assert_matches = "1.5"
+nb = "1.1"
+embedded-hal = "0.2"

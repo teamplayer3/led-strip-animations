@@ -35,3 +35,11 @@ pub fn min_3(a: f32, b: f32, c: f32) -> f32 {
         b
     }
 }
+
+pub fn wrap_on<T: num_traits::Unsigned + Ord>(value: T, max: T) -> T {
+    if value > max {
+        value - max
+    } else {
+        value
+    }
+}

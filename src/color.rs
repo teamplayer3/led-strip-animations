@@ -7,7 +7,10 @@ use keyframe::CanTween;
 use num_traits::Zero;
 use rgb::RGB8;
 
-use crate::util::{max_3, min_3};
+use crate::{
+    indexing::LedId,
+    util::{max_3, min_3, wrap_on},
+};
 
 const MAX_RGB_VALUE: u8 = 255;
 
@@ -284,11 +287,15 @@ impl CanTween for HSVColor {
     }
 }
 
-fn wrap_on<T: num_traits::Unsigned + Ord>(value: T, max: T) -> T {
-    if value > max {
-        value - max
-    } else {
-        value
+#[derive(Debug)]
+pub struct LedColoring<C> {
+    pub led: LedId,
+    pub color: C,
+}
+
+impl<C> LedColoring<C> {
+    pub fn new(led: LedId, color: C) -> Self {
+        Self { led, color }
     }
 }
 
