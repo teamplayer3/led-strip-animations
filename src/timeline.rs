@@ -24,14 +24,12 @@ where
     fn should_repeat(&self) -> bool;
 }
 
-#[cfg(feature = "alloc")]
 #[derive(Default)]
 pub struct DynTimelineBuilder<S> {
     animations: alloc::vec::Vec<TimedAnimation<BoxedAnimation<S>, S>>,
     repeating: bool,
 }
 
-#[cfg(feature = "alloc")]
 impl<S> DynTimelineBuilder<S>
 where
     S: Strip + 'static,
@@ -69,13 +67,11 @@ where
     }
 }
 
-#[cfg(feature = "alloc")]
 pub struct DynTimeline<S> {
     entries: alloc::vec::Vec<TimedAnimation<crate::animation::BoxedAnimation<S>, S>>,
     repeating: bool,
 }
 
-#[cfg(feature = "alloc")]
 impl<S> DynTimeline<S> {
     pub fn new(repeating: bool) -> Self {
         let entries = { alloc::vec::Vec::new() };
@@ -83,14 +79,12 @@ impl<S> DynTimeline<S> {
     }
 }
 
-#[cfg(feature = "alloc")]
 pub struct DynTimelineIter<'a, S> {
     s: &'a [TimedAnimation<crate::animation::BoxedAnimation<S>, S>],
     act_index: usize,
     within_tick: Tick,
 }
 
-#[cfg(feature = "alloc")]
 impl<'a, S> DynTimelineIter<'a, S> {
     pub(crate) fn new(
         animations: &'a alloc::vec::Vec<TimedAnimation<crate::animation::BoxedAnimation<S>, S>>,
@@ -104,7 +98,6 @@ impl<'a, S> DynTimelineIter<'a, S> {
     }
 }
 
-#[cfg(feature = "alloc")]
 impl<'a, S> Iterator for DynTimelineIter<'a, S>
 where
     S: Strip,

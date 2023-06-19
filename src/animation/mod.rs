@@ -66,22 +66,6 @@ impl AnimationMeta {
     }
 }
 
-#[cfg(feature = "nightly")]
-pub trait Animation<S, A: Allocator = Global>
-where
-    S: Strip,
-{
-    fn animate(
-        &self,
-        current_tick: Tick,
-        strip: &S,
-        animation_meta: &AnimationMeta,
-    ) -> Box<dyn Iterator<Item = LedColoring<HSVColor>>, A>;
-
-    fn duration(&self) -> Ticks;
-}
-
-#[cfg(not(feature = "nightly"))]
 pub trait Animation<S>
 where
     S: Strip,
@@ -96,13 +80,8 @@ where
     fn duration(&self) -> Ticks;
 }
 
-#[cfg(feature = "nightly")]
-pub type BoxedAnimation<A> = Box<dyn Animation<A>>;
-
-#[cfg(not(feature = "nightly"))]
 pub type BoxedAnimation<S> = Box<dyn Animation<S>>;
 
-#[cfg(not(feature = "nightly"))]
 impl<S> Animation<S> for BoxedAnimation<S>
 where
     S: Strip,

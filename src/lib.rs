@@ -1,4 +1,3 @@
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
 #![no_std]
 
 extern crate alloc;
