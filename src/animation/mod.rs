@@ -1,4 +1,6 @@
-use core::{fmt::Debug, ops::Deref};
+use core::{cell::RefCell, fmt::Debug, marker::PhantomData, ops::Deref};
+
+use alloc::{boxed::Box, rc::Rc};
 
 use crate::{
     color::{HSVColor, LedColoring},
@@ -9,6 +11,9 @@ use super::timeline::{Tick, Ticks};
 
 mod running_light;
 mod static_animation;
+
+pub use running_light::{AnimationPart, AnimationSymmetry, AnimationType, RunningLight};
+pub use static_animation::StaticAnimation;
 
 #[cfg(test)]
 mod testing;
@@ -27,6 +32,7 @@ pub enum IterationState {
     Single,
 }
 
+#[cfg(test)]
 impl IterationState {
     pub(super) fn new(iteration_index: u32, remaining_iterations: u32) -> Self {
         if iteration_index == 0 && remaining_iterations == 0 {
@@ -60,74 +66,121 @@ impl AnimationMeta {
     }
 }
 
-pub trait Animation {
-    type Strip: Strip;
-    type Iter: Iterator<Item = LedColoring<HSVColor>>;
-
+#[cfg(feature = "nightly")]
+pub trait Animation<S, A: Allocator = Global>
+where
+    S: Strip,
+{
     fn animate(
         &self,
         current_tick: Tick,
-        strip: &Self::Strip,
+        strip: &S,
         animation_meta: &AnimationMeta,
-    ) -> Self::Iter;
+    ) -> Box<dyn Iterator<Item = LedColoring<HSVColor>>, A>;
 
     fn duration(&self) -> Ticks;
 }
 
-#[cfg(feature = "alloc")]
-pub type BoxedAnimation<S, I> = alloc::boxed::Box<dyn Animation<Strip = S, Iter = I>>;
-
-#[cfg(feature = "alloc")]
-impl<S, I> Animation for BoxedAnimation<S, I>
+#[cfg(not(feature = "nightly"))]
+pub trait Animation<S>
 where
     S: Strip,
-    I: Iterator<Item = LedColoring<HSVColor>>,
 {
-    type Strip = S;
-    type Iter = I;
-
     fn animate(
         &self,
         current_tick: Tick,
-        strip: &Self::Strip,
+        strip: Rc<RefCell<S>>,
         animation_meta: &AnimationMeta,
-    ) -> Self::Iter {
-        use core::ops::Deref;
+    ) -> Box<dyn Iterator<Item = LedColoring<HSVColor>>>;
+
+    fn duration(&self) -> Ticks;
+}
+
+#[cfg(feature = "nightly")]
+pub type BoxedAnimation<A> = Box<dyn Animation<A>>;
+
+#[cfg(not(feature = "nightly"))]
+pub type BoxedAnimation<S> = Box<dyn Animation<S>>;
+
+#[cfg(not(feature = "nightly"))]
+impl<S> Animation<S> for BoxedAnimation<S>
+where
+    S: Strip,
+{
+    fn animate(
+        &self,
+        current_tick: Tick,
+        strip: Rc<RefCell<S>>,
+        animation_meta: &AnimationMeta,
+    ) -> Box<dyn Iterator<Item = LedColoring<HSVColor>>> {
         self.deref().animate(current_tick, strip, animation_meta)
     }
 
     fn duration(&self) -> Ticks {
-        use core::ops::Deref;
         self.deref().duration()
     }
 }
 
-pub struct TimedAnimation<A>(pub Tick, pub A);
+pub trait TimedAt {
+    fn at_tick(&self) -> Tick;
+}
 
-impl<A> TimedAnimation<A> {
+pub trait TimedAnimationAt<S: Strip>: TimedAt + Animation<S> {}
+
+impl<S, T> TimedAnimationAt<S> for T
+where
+    T: Animation<S> + TimedAt,
+    S: Strip,
+{
+}
+
+pub struct TimedAnimation<A, S>(pub Tick, pub A, PhantomData<S>);
+
+impl<A, S> TimedAnimation<A, S> {
     pub fn new(at_tick: Tick, animation: A) -> Self {
-        Self(at_tick, animation)
+        Self(at_tick, animation, PhantomData::default())
     }
 }
 
-impl<A> TimedAnimation<A>
+impl<A, S> TimedAnimation<A, S>
 where
-    A: Animation,
+    A: Animation<S>,
+    S: Strip,
 {
     pub fn animation_duration(&self) -> Ticks {
         self.1.duration()
     }
 }
 
-impl<A: Sized> TimedAnimation<alloc::boxed::Box<A>> {
-    pub fn deref_inner<'a>(&'a self) -> TimedAnimation<&'a A> {
-        TimedAnimation(self.0, self.1.deref())
+impl<A, S> Animation<S> for TimedAnimation<A, S>
+where
+    S: Strip,
+    A: Animation<S>,
+{
+    fn animate(
+        &self,
+        current_tick: Tick,
+        strip: Rc<RefCell<S>>,
+        animation_meta: &AnimationMeta,
+    ) -> Box<dyn Iterator<Item = LedColoring<HSVColor>>> {
+        self.1.animate(current_tick, strip, animation_meta)
+    }
+
+    fn duration(&self) -> Ticks {
+        self.1.duration()
     }
 }
 
-impl<A> Debug for TimedAnimation<A>
+impl<A, S> TimedAt for TimedAnimation<A, S> {
+    fn at_tick(&self) -> Tick {
+        self.0
+    }
+}
+
+impl<A, S> Debug for TimedAnimation<A, S>
 where
-    A: Animation,
+    A: Animation<S>,
+    S: Strip,
 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_tuple("TimedAnimation")

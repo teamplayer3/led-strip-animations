@@ -1,5 +1,5 @@
 use crate::{
-    animation::{Animation, BoxedAnimation},
+    animation::{Animation, BoxedAnimation, TimedAnimationAt, TimedAt},
     color::{HSVColor, LedColoring},
     strip::Strip,
 };
@@ -11,31 +11,28 @@ pub type Ticks = u32;
 
 pub trait Timeline<S, A, I>
 where
-    A: Animation<Strip = S, Iter = I>,
+    A: Animation<S> + TimedAt + 'static,
     I: Iterator<Item = LedColoring<HSVColor>>,
     S: Strip + 'static,
 {
-    type Iter<'a>: Iterator<Item = &'a TimedAnimation<A>>
+    type Iter<'a>: Iterator<Item = &'a dyn TimedAnimationAt<S>>
     where
-        Self: 'a,
-        A: 'a;
+        Self: 'a;
 
-    fn get_current_entries<'a>(&'a self, current_tick: Tick) -> Self::Iter<'a>;
+    fn get_current_entries(&self, current_tick: Tick) -> Self::Iter<'_>;
     fn has_finished(&self, current_tick: Tick) -> bool;
     fn should_repeat(&self) -> bool;
 }
 
 #[cfg(feature = "alloc")]
-pub struct DynTimelineBuilder<S, I>
-where
-    S: Strip,
-{
-    animations: alloc::vec::Vec<TimedAnimation<BoxedAnimation<S, I>>>,
+#[derive(Default)]
+pub struct DynTimelineBuilder<S> {
+    animations: alloc::vec::Vec<TimedAnimation<BoxedAnimation<S>, S>>,
     repeating: bool,
 }
 
 #[cfg(feature = "alloc")]
-impl<S, I> DynTimelineBuilder<S, I>
+impl<S> DynTimelineBuilder<S>
 where
     S: Strip + 'static,
 {
@@ -48,7 +45,7 @@ where
 
     pub fn add_animation<A>(mut self, start: Tick, animation: A) -> Self
     where
-        A: crate::animation::Animation<Strip = S, Iter = I> + 'static,
+        A: crate::animation::Animation<S> + 'static,
     {
         self.animations.push(TimedAnimation::new(
             start,
@@ -62,17 +59,9 @@ where
         self
     }
 
-    pub fn finish(self) -> DynTimeline<S, I> {
+    pub fn finish(self) -> DynTimeline<S> {
         let mut animations = self.animations;
-        animations.sort_by(|a, b| {
-            if a.0 < b.0 {
-                core::cmp::Ordering::Less
-            } else if a.0 > b.0 {
-                core::cmp::Ordering::Greater
-            } else {
-                core::cmp::Ordering::Equal
-            }
-        });
+        animations.sort_by(|a, b| a.0.cmp(&b.0));
         DynTimeline {
             entries: animations,
             repeating: self.repeating,
@@ -81,19 +70,13 @@ where
 }
 
 #[cfg(feature = "alloc")]
-pub struct DynTimeline<S, I>
-where
-    S: Strip,
-{
-    entries: alloc::vec::Vec<TimedAnimation<crate::animation::BoxedAnimation<S, I>>>,
+pub struct DynTimeline<S> {
+    entries: alloc::vec::Vec<TimedAnimation<crate::animation::BoxedAnimation<S>, S>>,
     repeating: bool,
 }
 
 #[cfg(feature = "alloc")]
-impl<S, I> DynTimeline<S, I>
-where
-    S: Strip,
-{
+impl<S> DynTimeline<S> {
     pub fn new(repeating: bool) -> Self {
         let entries = { alloc::vec::Vec::new() };
         Self { entries, repeating }
@@ -101,22 +84,16 @@ where
 }
 
 #[cfg(feature = "alloc")]
-pub struct DynTimelineIter<'a, S, I>
-where
-    S: Strip,
-{
-    s: &'a [TimedAnimation<crate::animation::BoxedAnimation<S, I>>],
+pub struct DynTimelineIter<'a, S> {
+    s: &'a [TimedAnimation<crate::animation::BoxedAnimation<S>, S>],
     act_index: usize,
     within_tick: Tick,
 }
 
 #[cfg(feature = "alloc")]
-impl<'a, S, I> DynTimelineIter<'a, S, I>
-where
-    S: Strip,
-{
+impl<'a, S> DynTimelineIter<'a, S> {
     pub(crate) fn new(
-        animations: &'a alloc::vec::Vec<TimedAnimation<crate::animation::BoxedAnimation<S, I>>>,
+        animations: &'a alloc::vec::Vec<TimedAnimation<crate::animation::BoxedAnimation<S>, S>>,
         within_tick: Tick,
     ) -> Self {
         Self {
@@ -128,12 +105,11 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<'a, S, I> Iterator for DynTimelineIter<'a, S, I>
+impl<'a, S> Iterator for DynTimelineIter<'a, S>
 where
     S: Strip,
-    I: Iterator<Item = LedColoring<HSVColor>> + 'static,
 {
-    type Item = &'a TimedAnimation<BoxedAnimation<S, I>>;
+    type Item = &'a dyn TimedAnimationAt<S>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let act_animation = loop {
@@ -150,7 +126,7 @@ where
         act_animation.and_then(|act_animation| {
             self.act_index += 1;
             if act_animation.0 < self.within_tick {
-                Some(act_animation)
+                Some(act_animation as &dyn TimedAnimationAt<S>)
             } else {
                 None
             }
@@ -158,15 +134,15 @@ where
     }
 }
 
-#[cfg(feature = "alloc")]
-impl<S, I> Timeline<S, BoxedAnimation<S, I>, I> for DynTimeline<S, I>
+impl<S, A, I> Timeline<S, A, I> for DynTimeline<S>
 where
+    A: Animation<S> + TimedAt + 'static,
     S: Strip + 'static,
     I: Iterator<Item = LedColoring<HSVColor>> + 'static,
 {
-    type Iter<'a> = DynTimelineIter<'a, S, I>;
+    type Iter<'a> = DynTimelineIter<'a, S>;
 
-    fn get_current_entries<'a>(&'a self, current_tick: Tick) -> Self::Iter<'a> {
+    fn get_current_entries(&self, current_tick: Tick) -> Self::Iter<'_> {
         DynTimelineIter::new(&self.entries, current_tick)
     }
 

@@ -1,9 +1,9 @@
-use core::{cell::RefCell, iter::Flatten, marker::PhantomData, ops::Range};
+use core::{cell::RefCell, ops::Range};
 
 use alloc::{borrow::ToOwned, boxed::Box, rc::Rc};
 
 use crate::{
-    color::HSVColor,
+    color::{HSVColor, LedColoring},
     color_cache::ColorCache,
     curve::{calculate_with_curve, Curve},
     indexing::{Index, Indexing, LedId},
@@ -37,11 +37,11 @@ impl AnimationType {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct StepAnimationMeta {
-    reverse: bool,
-    curve: Curve,
-}
+// #[derive(Debug, Clone, Copy)]
+// pub struct StepAnimationMeta {
+//     reverse: bool,
+//     curve: Curve,
+// }
 
 #[derive(Debug, Clone, Copy)]
 pub struct AnimationPart {
@@ -91,13 +91,13 @@ impl HilledAnimationMeta {
 #[derive(Debug, Clone, Copy)]
 enum BorderType {
     ClosedStartEnd,
-    WrappingStart,
-    WrappingEnd,
+    // WrappingStart,
+    // WrappingEnd,
     WrappingStartEnd,
 }
 
 #[derive(Debug)]
-pub struct RunningLight<I, S> {
+pub struct RunningLight<I> {
     duration: Ticks,
     range: I,
     from_color: FromColoring,
@@ -105,10 +105,9 @@ pub struct RunningLight<I, S> {
     animation: AnimationType,
     border_wrapping: BorderType,
     fade_cache: Option<Rc<RefCell<ColorCache>>>,
-    _strip: PhantomData<S>,
 }
 
-impl<I, S> RunningLight<I, S> {
+impl<I> RunningLight<I> {
     pub fn new(
         duration: Ticks,
         range: I,
@@ -132,48 +131,44 @@ impl<I, S> RunningLight<I, S> {
                 true => BorderType::WrappingStartEnd,
                 false => BorderType::ClosedStartEnd,
             },
-            _strip: Default::default(),
         }
     }
 }
 
-impl<I, S> Animation for RunningLight<I, S>
+impl<S, I> Animation<S> for RunningLight<I>
 where
     I: Indexing + Clone + 'static,
     S: Strip + 'static,
 {
-    type Strip = S;
-
-    type Iter<'a> = Flatten<CurveBatchIterator<'a, I, S>>;
-
     fn animate(
         &self,
         current_tick: Tick,
-        strip: &Self::Strip,
+        strip: Rc<RefCell<S>>,
         _: &AnimationMeta,
-    ) -> Self::Iter<'a> {
+    ) -> Box<dyn Iterator<Item = LedColoring<HSVColor>>> {
         let animation_len = self.animation.animation_len();
         let jumps = calc_animation_jumps(&self.range, animation_len, self.border_wrapping);
         let act_jump = scale_time_to_jump(current_tick, self.duration, jumps, self.start_offset);
-        let start_led_id = scale_jump_to_animation_start(&self.range, animation_len, act_jump);
+        let start_led_id = scale_jump_to_animation_start(animation_len, act_jump);
 
         let animation_iter = ActiveRangeIter::new(
             start_led_id,
             animation_len,
-            u16::try_from(self.range.map_len()).unwrap(),
+            u16::try_from(self.range.len()).unwrap(),
             self.border_wrapping,
         );
 
-        let iter = CurveBatchIterator::new(
-            strip.to_owned(),
-            animation_iter,
-            self.range.to_owned(),
-            self.animation.to_owned(),
-            self.fade_cache.to_owned(),
-            self.from_color,
-        );
-
-        Box::new(iter.flatten())
+        Box::new(
+            CurveBatchIterator::new(
+                strip,
+                animation_iter,
+                self.range.to_owned(),
+                self.animation.to_owned(),
+                self.fade_cache.to_owned(),
+                self.from_color,
+            )
+            .flatten(),
+        )
     }
 
     fn duration(&self) -> Ticks {
@@ -182,26 +177,26 @@ where
 }
 
 fn calc_animation_jumps<I: Indexing>(range: &I, animation_len: u16, border: BorderType) -> u16 {
-    let led_range_len = range.map_len() as u16;
+    let led_range_len = range.len() as u16;
     match border {
         BorderType::ClosedStartEnd => led_range_len + (animation_len - 2),
         BorderType::WrappingStartEnd => led_range_len - 1,
-        _ => unimplemented!(),
+        // _ => unimplemented!(),
     }
 }
 
 fn scale_time_to_jump(time: Tick, duration: Ticks, jumps: u16, start_offset: i16) -> u16 {
     let jump = (time as f32 / (duration as f32 / jumps as f32)) as i16 + start_offset;
     if jump > jumps as i16 {
-        (jump.abs() as u16) % jumps
+        jump.unsigned_abs() % jumps
     } else if jump < 0 {
-        jumps - (jump.abs() as u16)
+        jumps - jump.unsigned_abs()
     } else {
         jump as u16
     }
 }
 
-fn scale_jump_to_animation_start<I: Indexing>(range: &I, animation_len: u16, act_jump: u16) -> i32 {
+fn scale_jump_to_animation_start(animation_len: u16, act_jump: u16) -> i32 {
     0 - (animation_len - 1) as i32 + act_jump as i32
 }
 
@@ -219,7 +214,7 @@ impl AnchoredRange {
     }
 }
 
-pub struct CurveBatchIterator<'a, I, S> {
+pub struct CurveBatchIterator<I, S> {
     index: u16,
     animation_iter: ActiveRangeIter,
     actual_animation_part: Option<AnchoredRange>,
@@ -227,13 +222,13 @@ pub struct CurveBatchIterator<'a, I, S> {
     animation: AnimationType,
     animation_range: I,
     from_color: FromColoring,
-    led_controller: &'a S,
+    led_controller: Rc<RefCell<S>>,
     fade_cache: Option<Rc<RefCell<ColorCache>>>,
 }
 
-impl<'a, I, S> CurveBatchIterator<'a, I, S> {
+impl<I, S> CurveBatchIterator<I, S> {
     fn new(
-        led_controller: &'a S,
+        led_controller: Rc<RefCell<S>>,
         animation_iter: ActiveRangeIter,
         animation_range: I,
         animation: AnimationType,
@@ -254,7 +249,7 @@ impl<'a, I, S> CurveBatchIterator<'a, I, S> {
     }
 }
 
-impl<'a, I, S> CurveBatchIterator<'a, I, S> {
+impl<I, S> CurveBatchIterator<I, S> {
     fn update_current_iter_state(&mut self) -> Option<(Anchor, LedId)> {
         loop {
             match self.actual_animation_part.take() {
@@ -290,11 +285,11 @@ impl<'a, I, S> CurveBatchIterator<'a, I, S> {
     }
 }
 
-impl<'a, I, S> Iterator for CurveBatchIterator<'a, I, S>
+impl<I, S> Iterator for CurveBatchIterator<I, S>
 where
     I: Indexing,
 {
-    type Item = FadeIter<'a, <I as Indexing>::OutputIndex, S>;
+    type Item = FadeIter<<I as Indexing>::OutputIndex, S>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let current_state = self.update_current_iter_state();
@@ -302,9 +297,9 @@ where
             Some(v) => v,
             None => return None,
         };
-        let mut led_final_idx = self
+        let led_final_idx = self
             .animation_range
-            .map(anchor + self.animation_part_item_idx.unwrap())
+            .index(anchor + self.animation_part_item_idx.unwrap())
             .expect("Led index out of range");
 
         let ret = FadeIter {
@@ -321,16 +316,16 @@ where
     }
 }
 
-pub struct FadeIter<'a, I, S> {
+pub struct FadeIter<I, S> {
     inner_iter: I,
     animation_led_index: LedId,
-    led_controller: &'a S,
+    led_controller: Rc<RefCell<S>>,
     fade_cache: Option<Rc<RefCell<ColorCache>>>,
     from_color: FromColoring,
     animation: AnimationType,
 }
 
-impl<'a, I, S> FadeIter<'a, I, S>
+impl<I, S> FadeIter<I, S>
 where
     S: Strip,
 {
@@ -416,7 +411,7 @@ where
     }
 }
 
-impl<'a, I, S> Iterator for FadeIter<'a, I, S>
+impl<I, S> Iterator for FadeIter<I, S>
 where
     I: ExactSizeIterator<Item = Index>,
     S: Strip,
@@ -504,15 +499,14 @@ impl Iterator for ActiveRangeIter {
                     // example: anchor= -2, general_an_len = 6, animation_len = 5
                     //          returns: [0, 1] | {2, 3, 4} with anchor 4
                     let animation_part = self.animation_offset..outside_len;
-                    let anchor =
-                        self.general_animation_len - u16::try_from(animation_part.len()).unwrap();
-                    let used_idx = u16::try_from(animation_part.len()).unwrap();
+                    let anchor = self.general_animation_len
+                        - u16::try_from(ExactSizeIterator::len(&animation_part)).unwrap();
+                    let used_idx = u16::try_from(ExactSizeIterator::len(&animation_part)).unwrap();
 
                     let ret = AnchoredRange::new(anchor, animation_part);
                     self.update(used_idx, 0);
                     Some(ret)
                 }
-                _ => unimplemented!(),
             }
         } else if an_end_outside {
             let outside_len = (u16::try_from(self.anchor).unwrap() + remaining_animation_len)
@@ -525,8 +519,8 @@ impl Iterator for ActiveRangeIter {
                     //          returns: [0, 1] | {2, 3, 4} with anchor 4
                     let animation_part =
                         self.animation_offset..(self.active_animation_len - outside_len);
-                    let anchor =
-                        self.general_animation_len - u16::try_from(animation_part.len()).unwrap();
+                    let anchor = self.general_animation_len
+                        - u16::try_from(ExactSizeIterator::len(&animation_part)).unwrap();
                     let ret = AnchoredRange::new(anchor, animation_part);
                     self.update(
                         remaining_animation_len,
@@ -541,22 +535,18 @@ impl Iterator for ActiveRangeIter {
                     //          returns: [0, 1] | {2, 3, 4} with anchor 4
                     let animation_part =
                         self.animation_offset..(self.active_animation_len - outside_len);
-                    let anchor =
-                        self.general_animation_len - u16::try_from(animation_part.len()).unwrap();
-                    let used_idx = u16::try_from(animation_part.len()).unwrap();
+                    let anchor = self.general_animation_len
+                        - u16::try_from(ExactSizeIterator::len(&animation_part)).unwrap();
+                    let used_idx = u16::try_from(ExactSizeIterator::len(&animation_part)).unwrap();
                     let ret = AnchoredRange::new(anchor, animation_part);
                     self.update(used_idx, 0);
                     Some(ret)
                 }
-                _ => unimplemented!(),
             }
         } else {
             let animation_part = self.animation_offset..self.active_animation_len;
             let ret = AnchoredRange::new(u16::try_from(self.anchor).unwrap(), animation_part);
-            self.update(
-                remaining_animation_len,
-                0 + i32::from(remaining_animation_len),
-            );
+            self.update(remaining_animation_len, i32::from(remaining_animation_len));
             Some(ret)
         }
     }
@@ -565,6 +555,9 @@ impl Iterator for ActiveRangeIter {
 #[cfg(test)]
 mod test {
 
+    use core::cell::RefCell;
+
+    use alloc::rc::Rc;
     use assert_matches::assert_matches;
 
     use crate::{
@@ -658,7 +651,7 @@ mod test {
 
     #[test]
     fn test_animate_running_light_fade_to() {
-        let mut led_controller = LedStrip::<SPI, 20>::new();
+        let led_controller = Rc::new(RefCell::new(LedStrip::<SPI, 20>::new()));
         let range = 6u16..10;
         let duration = 40;
         let animation = AnimationType::FadeToColor(FadeToAnimationMeta {
@@ -676,7 +669,7 @@ mod test {
             animation,
         );
         let mut animation_tester =
-            AnimationTester::new(animation, Iterations::Single, &mut led_controller);
+            AnimationTester::new(animation, Iterations::Single, led_controller);
 
         animation_tester.assert_state(0, [(6, HSVColor::new(0, 0, 0))]);
 
@@ -704,7 +697,7 @@ mod test {
 
     #[test]
     fn test_animate_running_light_fade_to_wrapped() {
-        let mut led_controller = LedStrip::<SPI, 20>::new();
+        let led_controller = Rc::new(RefCell::new(LedStrip::<SPI, 20>::new()));
         let range = 6u16..10;
         let duration = 40;
         let animation = AnimationType::FadeToColor(FadeToAnimationMeta {
@@ -722,7 +715,7 @@ mod test {
             animation,
         );
         let mut animation_tester =
-            AnimationTester::new(animation, Iterations::Single, &mut led_controller);
+            AnimationTester::new(animation, Iterations::Single, led_controller);
 
         animation_tester.assert_state(
             0,
@@ -754,7 +747,7 @@ mod test {
 
     #[test]
     fn test_animate_running_light_hilled() {
-        let mut led_controller = LedStrip::<SPI, 20>::new();
+        let led_controller = Rc::new(RefCell::new(LedStrip::<SPI, 20>::new()));
         let range = 6u16..10;
         let duration = 40;
         let animation = AnimationType::Hilled(HilledAnimationMeta {
@@ -772,7 +765,7 @@ mod test {
             animation,
         );
         let mut animation_tester =
-            AnimationTester::new(animation, Iterations::Single, &mut led_controller);
+            AnimationTester::new(animation, Iterations::Single, led_controller);
 
         animation_tester.assert_state(0, [(6, HSVColor::new(100, 0, 0))]);
 

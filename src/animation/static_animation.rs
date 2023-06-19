@@ -1,6 +1,6 @@
-use core::{cell::RefCell, fmt::Debug, marker::PhantomData};
+use core::{cell::RefCell, fmt::Debug};
 
-use alloc::{borrow::ToOwned, rc::Rc};
+use alloc::{borrow::ToOwned, boxed::Box, rc::Rc};
 
 use crate::{
     color::{HSVColor, LedColoring},
@@ -16,16 +16,15 @@ use super::{Animation, AnimationMeta};
 type FadeCache = Rc<RefCell<ColorCache>>;
 
 #[derive(Debug)]
-pub struct StaticAnimation<I, L> {
+pub struct StaticAnimation<I> {
     duration: Ticks,
     range: I,
     to: HSVColor,
     curve: Curve,
     fade_cache: FadeCache,
-    _led_controller: PhantomData<L>,
 }
 
-impl<I, L> StaticAnimation<I, L> {
+impl<I> StaticAnimation<I> {
     /// duration != 0, min. 1
     pub fn new(duration: Ticks, range: I, to: HSVColor, curve: Curve) -> Self {
         Self {
@@ -34,26 +33,21 @@ impl<I, L> StaticAnimation<I, L> {
             to,
             curve,
             fade_cache: Rc::new(RefCell::new(ColorCache::new())),
-            _led_controller: Default::default(),
         }
     }
 }
 
-impl<I, S> Animation for StaticAnimation<I, S>
+impl<S, I> Animation<S> for StaticAnimation<I>
 where
     I: Indexing + Clone + 'static,
     S: Strip,
 {
-    type Strip = S;
-
-    type Iter = SingleBatchIterator<I>;
-
     fn animate(
         &self,
         current_tick: Tick,
-        led_controller: &Self::Strip,
+        led_controller: Rc<RefCell<S>>,
         _: &AnimationMeta,
-    ) -> Self::Iter {
+    ) -> Box<dyn Iterator<Item = LedColoring<HSVColor>>> {
         if self.fade_cache.borrow().cache_size() == 0 {
             for i in 0..self.range.len() {
                 let led_idx = self
@@ -62,20 +56,20 @@ where
                     .unwrap()
                     .next()
                     .unwrap();
-                let _ = self
-                    .fade_cache
-                    .borrow_mut()
-                    .cache_color(led_idx, &led_controller.get_color_of_led(led_idx).into());
+                let _ = self.fade_cache.borrow_mut().cache_color(
+                    led_idx,
+                    &led_controller.borrow().get_color_of_led(led_idx).into(),
+                );
             }
         }
-        SingleBatchIterator::from_batch(
+        Box::new(SingleBatchIterator::from_batch(
             self.range.to_owned(),
             self.to,
             self.duration,
             self.curve.to_owned(),
             self.fade_cache.to_owned(),
             current_tick,
-        )
+        ))
     }
 
     fn duration(&self) -> Ticks {
@@ -146,6 +140,10 @@ where
 #[cfg(test)]
 mod test {
 
+    use core::cell::RefCell;
+
+    use alloc::rc::Rc;
+
     use crate::{
         animation::testing::{AnimationTester, Iterations},
         color::HSVColor,
@@ -159,11 +157,11 @@ mod test {
     #[test]
     fn switch_leds_on() {
         let color = HSVColor::new(100, 0, 100);
-        let mut led_controller = LedStrip::<SPI, 6>::new();
+        let led_controller = Rc::new(RefCell::new(LedStrip::<SPI, 6>::new()));
         let animation = StaticAnimation::new(1, 0..6, color, Curve::Step);
 
         let mut animation_tester =
-            AnimationTester::new(animation, Iterations::Single, &mut led_controller);
+            AnimationTester::new(animation, Iterations::Single, led_controller);
         animation_tester.assert_state(1, (0..6).map(|led| (led, HSVColor::new(100, 0, 100))));
     }
 }

@@ -1,6 +1,6 @@
+#![cfg_attr(feature = "nightly", feature(allocator_api))]
 #![no_std]
 
-#[cfg(feature = "alloc")]
 extern crate alloc;
 
 pub mod animation;

@@ -18,8 +18,8 @@ pub(crate) fn calculate_with_curve<H: CanTween + Copy>(
     to: &H,
     current_tick: Tick,
 ) -> H {
-    let from = from.clone();
-    let to = to.clone();
+    let from = *from;
+    let to = *to;
     match curve {
         Curve::Linear => ease_with_scaled_time(
             functions::Linear,

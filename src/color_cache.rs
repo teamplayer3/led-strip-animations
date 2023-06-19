@@ -21,13 +21,7 @@ impl SingleColor {
     }
 
     fn contains_led_id(&self, led_id: LedId) -> bool {
-        if self.ranges.iter().any(|range| range.contains(&led_id))
-            || self.single_led.contains(&led_id)
-        {
-            true
-        } else {
-            false
-        }
+        self.ranges.iter().any(|range| range.contains(&led_id)) || self.single_led.contains(&led_id)
     }
 
     fn cache_led(&mut self, led_id: LedId) {
@@ -47,12 +41,10 @@ impl SingleColor {
             } else {
                 range.end = led_id + 1
             }
+        } else if let Some(range) = self.grouping_single_led(led_id) {
+            self.ranges.push(range);
         } else {
-            if let Some(range) = self.grouping_single_led(led_id) {
-                self.ranges.push(range);
-            } else {
-                self.single_led.push(led_id);
-            }
+            self.single_led.push(led_id);
         }
     }
 
@@ -60,10 +52,10 @@ impl SingleColor {
         let r = self.ungroup_leds(led_id);
         if let Some(ranges) = r {
             for range in ranges {
-                if range.len() == 1 {
-                    self.single_led.push(range.start);
-                } else if range.len() > 1 {
-                    self.ranges.push(range);
+                match range.len() {
+                    1 => self.single_led.push(range.start),
+                    l if l > 1 => self.ranges.push(range),
+                    _ => (),
                 }
             }
             true
@@ -199,7 +191,7 @@ impl ColorCache {
 
     fn init(&mut self, color: &HSVColor) {
         match self.single_color_cache {
-            None => self.single_color_cache = Some(Box::new(SingleColor::new(color.clone()))),
+            None => self.single_color_cache = Some(Box::new(SingleColor::new(*color))),
             Some(_) => (),
         }
     }
