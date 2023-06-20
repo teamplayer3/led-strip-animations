@@ -11,7 +11,7 @@ use super::{
     timeline::{Tick, Ticks, Timeline},
 };
 
-pub trait AnProcessor {
+pub trait Processor {
     fn update(&mut self, current_tick: Tick);
     fn has_no_work(&self) -> bool;
 }
@@ -38,7 +38,7 @@ impl<A, T, S> TimelineProcessor<A, T, S> {
     }
 }
 
-impl<A, T, S> AnProcessor for TimelineProcessor<A, T, S>
+impl<A, T, S> Processor for TimelineProcessor<A, T, S>
 where
     A: TimedAnimationAt<S> + 'static,
     T: Timeline<S, A>,
