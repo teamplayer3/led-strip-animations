@@ -150,7 +150,7 @@ impl ColorCache {
                 None
             }
         } else {
-            unimplemented!()
+            unreachable!()
         }
     }
 
@@ -162,7 +162,7 @@ impl ColorCache {
                 None
             }
         } else {
-            unimplemented!()
+            unreachable!()
         }
     }
 
