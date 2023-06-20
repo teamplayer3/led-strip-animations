@@ -1,3 +1,4 @@
+#![feature(drain_filter)]
 #![no_std]
 
 extern crate alloc;
@@ -5,6 +6,7 @@ extern crate alloc;
 pub mod animation;
 pub mod color;
 mod color_cache;
+pub mod controller;
 mod curve;
 pub mod indexing;
 pub mod processing;
