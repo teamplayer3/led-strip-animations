@@ -32,9 +32,8 @@ pub enum IterationState {
     Single,
 }
 
-#[cfg(test)]
 impl IterationState {
-    pub(super) fn new(iteration_index: u32, remaining_iterations: u32) -> Self {
+    pub(crate) fn new(iteration_index: u32, remaining_iterations: u32) -> Self {
         if iteration_index == 0 && remaining_iterations == 0 {
             Self::Single
         } else if iteration_index == 0 {
@@ -51,7 +50,8 @@ impl IterationState {
         }
     }
 
-    pub(super) fn single() -> Self {
+    #[cfg(test)]
+    pub(crate) fn single() -> Self {
         Self::new(0, 0)
     }
 }
@@ -61,7 +61,7 @@ pub struct AnimationMeta {
 }
 
 impl AnimationMeta {
-    pub fn new(iteration_state: IterationState) -> Self {
+    pub(crate) fn new(iteration_state: IterationState) -> Self {
         Self { iteration_state }
     }
 }
