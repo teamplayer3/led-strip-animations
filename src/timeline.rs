@@ -1,6 +1,5 @@
 use crate::{
     animation::{Animation, BoxedAnimation, TimedAnimationAt, TimedAt},
-    color::{HSVColor, LedColoring},
     strip::Strip,
 };
 
@@ -9,10 +8,9 @@ use super::animation::TimedAnimation;
 pub type Tick = u32;
 pub type Ticks = u32;
 
-pub trait Timeline<S, A, I>
+pub trait Timeline<S, A>
 where
     A: Animation<S> + TimedAt + 'static,
-    I: Iterator<Item = LedColoring<HSVColor>>,
     S: Strip + 'static,
 {
     type Iter<'a>: Iterator<Item = &'a dyn TimedAnimationAt<S>>
@@ -127,11 +125,10 @@ where
     }
 }
 
-impl<S, A, I> Timeline<S, A, I> for DynTimeline<S>
+impl<S, A> Timeline<S, A> for DynTimeline<S>
 where
     A: Animation<S> + TimedAt + 'static,
     S: Strip + 'static,
-    I: Iterator<Item = LedColoring<HSVColor>> + 'static,
 {
     type Iter<'a> = DynTimelineIter<'a, S>;
 
