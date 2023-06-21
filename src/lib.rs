@@ -7,7 +7,7 @@ pub mod animation;
 pub mod color;
 mod color_cache;
 pub mod controller;
-mod curve;
+pub mod curve;
 pub mod indexing;
 pub mod processing;
 pub mod strip;
