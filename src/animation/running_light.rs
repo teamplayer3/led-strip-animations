@@ -142,13 +142,13 @@ where
 {
     fn animate(
         &self,
-        current_tick: Tick,
+        animation_tick: Tick,
         strip: Rc<RefCell<S>>,
         _: &AnimationMeta,
     ) -> Box<dyn Iterator<Item = LedColoring<HSVColor>>> {
         let animation_len = self.animation.animation_len();
         let jumps = calc_animation_jumps(&self.range, animation_len, self.border_wrapping);
-        let act_jump = scale_time_to_jump(current_tick, self.duration, jumps, self.start_offset);
+        let act_jump = scale_time_to_jump(animation_tick, self.duration, jumps, self.start_offset);
         let start_led_id = scale_jump_to_animation_start(animation_len, act_jump);
 
         let animation_iter = ActiveRangeIter::new(

@@ -50,7 +50,6 @@ impl IterationState {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn single() -> Self {
         Self::new(0, 0)
     }
@@ -72,7 +71,7 @@ where
 {
     fn animate(
         &self,
-        current_tick: Tick,
+        animation_tick: Tick,
         strip: Rc<RefCell<S>>,
         animation_meta: &AnimationMeta,
     ) -> Box<dyn Iterator<Item = LedColoring<HSVColor>>>;
@@ -88,11 +87,11 @@ where
 {
     fn animate(
         &self,
-        current_tick: Tick,
+        animation_tick: Tick,
         strip: Rc<RefCell<S>>,
         animation_meta: &AnimationMeta,
     ) -> Box<dyn Iterator<Item = LedColoring<HSVColor>>> {
-        self.deref().animate(current_tick, strip, animation_meta)
+        self.deref().animate(animation_tick, strip, animation_meta)
     }
 
     fn duration(&self) -> Ticks {
@@ -138,11 +137,11 @@ where
 {
     fn animate(
         &self,
-        current_tick: Tick,
+        animation_tick: Tick,
         strip: Rc<RefCell<S>>,
         animation_meta: &AnimationMeta,
     ) -> Box<dyn Iterator<Item = LedColoring<HSVColor>>> {
-        self.1.animate(current_tick, strip, animation_meta)
+        self.1.animate(animation_tick, strip, animation_meta)
     }
 
     fn duration(&self) -> Ticks {

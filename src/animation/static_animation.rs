@@ -44,7 +44,7 @@ where
 {
     fn animate(
         &self,
-        current_tick: Tick,
+        animation_tick: Tick,
         led_controller: Rc<RefCell<S>>,
         _: &AnimationMeta,
     ) -> Box<dyn Iterator<Item = LedColoring<HSVColor>>> {
@@ -68,7 +68,7 @@ where
             self.duration,
             self.curve.to_owned(),
             self.fade_cache.to_owned(),
-            current_tick,
+            animation_tick,
         ))
     }
 
