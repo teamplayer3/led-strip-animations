@@ -78,3 +78,49 @@ where
         self.no_work
     }
 }
+
+pub struct SingleAnimationProcessor<A, S> {
+    animation: A,
+    strip: Rc<RefCell<S>>,
+    has_finished: bool,
+}
+
+impl<A, S> SingleAnimationProcessor<A, S> {
+    pub fn new(animation: A, strip: Rc<RefCell<S>>) -> Self {
+        Self {
+            animation,
+            strip,
+            has_finished: false,
+        }
+    }
+}
+
+impl<A, S> Processor for SingleAnimationProcessor<A, S>
+where
+    A: TimedAnimationAt<S> + 'static,
+    S: Strip + 'static,
+{
+    fn update(&mut self, current_tick: Tick) {
+        let start = self.animation.at_tick();
+        if start + self.animation.duration() > current_tick {
+            self.has_finished = true;
+            return;
+        }
+
+        let animation_step = self.animation.animate(
+            current_tick - start,
+            self.strip.clone(),
+            &AnimationMeta::new(IterationState::single()),
+        );
+
+        for coloring in animation_step {
+            self.strip
+                .borrow_mut()
+                .set_led_to_color(coloring.led, &coloring.color.into())
+        }
+    }
+
+    fn has_no_work(&self) -> bool {
+        self.has_finished
+    }
+}
