@@ -8,8 +8,8 @@ edition = "2021"
 [features]
 
 [dependencies]
-num = "0.4"
-num-traits = "0.2"
+num = { version = "0.4", default-features = false }
+num-traits = { version = "0.2", default-features = false }
 rgb = "0.8"
 keyframe = "1.1"
 
