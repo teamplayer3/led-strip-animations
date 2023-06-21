@@ -3,8 +3,8 @@ use core::cell::RefCell;
 use alloc::{borrow::ToOwned, boxed::Box, rc::Rc, vec::Vec};
 
 use crate::{
-    animation::TimedAnimationAt,
-    processing::{Processor, TimelineProcessor},
+    animation::{Animation, TimedAnimation, TimedAnimationAt},
+    processing::{Processor, SingleAnimationProcessor, TimelineProcessor},
     strip::Strip,
     timeline::{Tick, Ticks, Timeline},
 };
@@ -37,6 +37,7 @@ struct Entry<P> {
 
 pub struct AnimationController<S> {
     processors: Vec<Entry<Box<dyn Processor>>>,
+    current_tick: Tick,
     // last_time: Timestamp,
     strip: Rc<RefCell<S>>,
 }
@@ -45,6 +46,7 @@ impl<S> AnimationController<S> {
     pub fn new(strip: Rc<RefCell<S>>) -> Self {
         Self {
             processors: Vec::new(),
+            current_tick: 0,
             // last_time: 0,
             strip,
         }
@@ -71,16 +73,34 @@ impl<S> AnimationController<S> {
         handle
     }
 
+    pub fn queue_animation<A>(&mut self, animation: A, _at_time: StartingPoint) -> AnimationHandle
+    where
+        A: Animation<S> + 'static,
+        S: Strip + 'static,
+    {
+        let handle = AnimationHandle::new();
+        self.processors.push(Entry {
+            processor: Box::new(SingleAnimationProcessor::new(
+                TimedAnimation::new(self.current_tick, animation),
+                self.strip.clone(),
+            )),
+            handle: handle.clone(),
+        });
+
+        handle
+    }
+
     pub fn stop_animation(&mut self, animation_handle: AnimationHandle) {
         self.processors
             .drain_filter(|e| e.handle.eq(&animation_handle));
     }
 
-    pub fn update(&mut self, current_tick: Tick) {
+    pub fn update(&mut self) {
         for e in self.processors.iter_mut() {
-            e.processor.update(current_tick);
+            e.processor.update(self.current_tick);
         }
         self.processors.drain_filter(|e| e.processor.has_no_work());
+        self.current_tick += 1;
     }
 
     pub fn has_no_work(&self) -> bool {
