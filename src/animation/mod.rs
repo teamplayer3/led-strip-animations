@@ -13,7 +13,8 @@ mod running_light;
 mod static_animation;
 
 pub use running_light::{
-    AnimationPart, AnimationSymmetry, AnimationType, HilledAnimationMeta, RunningLight,
+    AnimationPart, AnimationSymmetry, AnimationType, FadeToAnimationMeta, HilledAnimationMeta,
+    RunningLight,
 };
 pub use static_animation::StaticAnimation;
 
