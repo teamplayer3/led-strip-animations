@@ -12,7 +12,9 @@ use super::timeline::{Tick, Ticks};
 mod running_light;
 mod static_animation;
 
-pub use running_light::{AnimationPart, AnimationSymmetry, AnimationType, RunningLight};
+pub use running_light::{
+    AnimationPart, AnimationSymmetry, AnimationType, HilledAnimationMeta, RunningLight,
+};
 pub use static_animation::StaticAnimation;
 
 #[cfg(test)]
