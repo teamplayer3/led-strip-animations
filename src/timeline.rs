@@ -125,9 +125,8 @@ where
     }
 }
 
-impl<S, A> Timeline<S, A> for DynTimeline<S>
+impl<S> Timeline<S, TimedAnimation<BoxedAnimation<S>, S>> for DynTimeline<S>
 where
-    A: Animation<S> + TimedAt + 'static,
     S: Strip + 'static,
 {
     type Iter<'a> = DynTimelineIter<'a, S>;
