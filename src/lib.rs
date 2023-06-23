@@ -1,4 +1,3 @@
-#![feature(drain_filter)]
 #![no_std]
 
 extern crate alloc;

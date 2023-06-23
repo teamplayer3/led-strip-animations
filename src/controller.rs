@@ -91,19 +91,29 @@ impl<S> AnimationController<S> {
     }
 
     pub fn stop_animation(&mut self, animation_handle: AnimationHandle) {
-        self.processors
-            .drain_filter(|e| e.handle.eq(&animation_handle));
+        self.remove_processor(|e| e.handle == animation_handle);
     }
 
     pub fn update(&mut self) {
         for e in self.processors.iter_mut() {
             e.processor.update(self.current_tick);
         }
-        self.processors.drain_filter(|e| e.processor.has_no_work());
+
+        self.remove_processor(|e| e.processor.has_no_work());
         self.current_tick += 1;
     }
 
     pub fn has_no_work(&self) -> bool {
         self.processors.len() == 0
+    }
+
+    fn remove_processor(&mut self, predicate: impl Fn(&Entry<Box<dyn Processor>>) -> bool) {
+        self.processors
+            .iter()
+            .enumerate()
+            .find_map(|e| if predicate(e.1) { Some(e.0) } else { None })
+            .map(|i| {
+                self.processors.remove(i);
+            });
     }
 }
