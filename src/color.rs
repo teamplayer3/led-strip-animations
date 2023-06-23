@@ -4,7 +4,9 @@ use core::{
 };
 
 use keyframe::CanTween;
-use num_traits::Zero;
+// indicates a warning because abs() exists for f32 with std, but no_std doesn't have it
+#[allow(unused_imports)]
+use num_traits::{Float, Zero};
 use rgb::RGB8;
 
 use crate::{
