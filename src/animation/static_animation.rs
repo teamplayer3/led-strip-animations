@@ -1,6 +1,6 @@
 use core::{cell::RefCell, fmt::Debug};
 
-use alloc::{borrow::ToOwned, boxed::Box, rc::Rc};
+use alloc::{boxed::Box, rc::Rc};
 
 use crate::{
     color::{HSVColor, LedColoring},
@@ -63,11 +63,11 @@ where
             }
         }
         Box::new(SingleBatchIterator::from_batch(
-            self.range.to_owned(),
+            self.range.clone(),
             self.to,
             self.duration,
-            self.curve.to_owned(),
-            self.fade_cache.to_owned(),
+            self.curve.clone(),
+            self.fade_cache.clone(),
             animation_tick,
         ))
     }

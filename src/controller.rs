@@ -1,6 +1,6 @@
 use core::cell::RefCell;
 
-use alloc::{borrow::ToOwned, boxed::Box, rc::Rc, vec::Vec};
+use alloc::{boxed::Box, rc::Rc, vec::Vec};
 
 use crate::{
     animation::{Animation, TimedAnimation, TimedAnimationAt},
@@ -65,7 +65,7 @@ impl<S> AnimationController<S> {
         // };
         let handle = AnimationHandle::new();
         self.processors.push(Entry {
-            processor: Box::new(TimelineProcessor::new(timeline, self.strip.to_owned())),
+            processor: Box::new(TimelineProcessor::new(timeline, self.strip.clone())),
             // start_time: time_offset,
             handle: handle.clone(),
         });

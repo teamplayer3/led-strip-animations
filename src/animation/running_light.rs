@@ -1,6 +1,6 @@
 use core::{cell::RefCell, ops::Range};
 
-use alloc::{borrow::ToOwned, boxed::Box, rc::Rc};
+use alloc::{boxed::Box, rc::Rc};
 
 use crate::{
     color::{HSVColor, LedColoring},
@@ -162,9 +162,9 @@ where
             CurveBatchIterator::new(
                 strip,
                 animation_iter,
-                self.range.to_owned(),
-                self.animation.to_owned(),
-                self.fade_cache.to_owned(),
+                self.range.clone(),
+                self.animation.clone(),
+                self.fade_cache.clone(),
                 self.from_color,
             )
             .flatten(),
@@ -305,10 +305,10 @@ where
         let ret = FadeIter {
             animation: self.animation,
             animation_led_index: led_idx,
-            fade_cache: self.fade_cache.to_owned(),
+            fade_cache: self.fade_cache.clone(),
             from_color: self.from_color,
             inner_iter: led_final_idx,
-            led_controller: self.led_controller.to_owned(),
+            led_controller: self.led_controller.clone(),
         };
         self.index += 1;
 
