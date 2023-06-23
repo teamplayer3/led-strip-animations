@@ -22,7 +22,7 @@ jobs:
           toolchain: stable
           override: true
           components: rustfmt, clippy
-      - run: cargo fmt
+      - run: cargo fmt --check
       - run: cargo-clippy --deny
 
   test:
