@@ -11,7 +11,7 @@ edition = "2021"
 num = { version = "0.4", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 rgb = "0.8"
-keyframe = "1.1"
+keyframe = {version = "1.1", git = "https://github.com/HannesMann/keyframe", default-features = false }
 
 [dev-dependencies]
 assert_matches = "1.5"
