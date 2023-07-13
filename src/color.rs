@@ -22,6 +22,8 @@ pub trait Spectrum {
 
     /// Returns the color at the given percentage (0.0 - 1.0) of the spectrum.
     fn color_at(&self, percentage: f32) -> TransparentColor<Self::Color>;
+
+    fn is_transparent(&self) -> bool;
 }
 
 pub struct PeakSpectrum {
@@ -42,6 +44,10 @@ impl Spectrum for PeakSpectrum {
 
         let color = calculate_with_curve_percentage(&self.curve, from_c, to_c, p);
         color
+    }
+
+    fn is_transparent(&self) -> bool {
+        !self.from_color.is_opaque() || !self.to_color.is_opaque()
     }
 }
 
