@@ -61,3 +61,12 @@ pub(crate) fn calculate_with_curve<H: CanTween + Copy>(
         ),
     }
 }
+
+pub(crate) fn calculate_with_curve_percentage<H: CanTween + Copy>(
+    curve: &Curve,
+    from: &H,
+    to: &H,
+    percentage: f32,
+) -> H {
+    calculate_with_curve(curve, 1000, from, to, (percentage * 1000f32) as Tick)
+}

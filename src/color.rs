@@ -10,11 +10,77 @@ use num_traits::{Float, Zero};
 use rgb::RGB8;
 
 use crate::{
+    curve::{calculate_with_curve_percentage, Curve},
     indexing::LedId,
     util::{max_3, min_3, wrap_on},
 };
 
 const MAX_RGB_VALUE: u8 = 255;
+
+pub trait Spectrum {
+    type Color;
+
+    /// Returns the color at the given percentage (0.0 - 1.0) of the spectrum.
+    fn color_at(&self, percentage: f32) -> TransparentColor<Self::Color>;
+}
+
+pub struct PeakSpectrum {
+    pub from_color: TransparentColor<HSVColor>,
+    pub to_color: TransparentColor<HSVColor>,
+    pub curve: Curve,
+}
+
+impl Spectrum for PeakSpectrum {
+    type Color = HSVColor;
+
+    fn color_at(&self, percentage: f32) -> TransparentColor<Self::Color> {
+        let (from_c, to_c, p) = if percentage < 0.5 {
+            (&self.from_color, &self.to_color, percentage)
+        } else {
+            (&self.to_color, &self.from_color, 1.0 - percentage)
+        };
+
+        let color = calculate_with_curve_percentage(&self.curve, from_c, to_c, p);
+        color
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TransparentColor<C> {
+    pub color: C,
+    pub transparency: f32,
+}
+
+impl<C> TransparentColor<C> {
+    pub const fn new(color: C, transparency: f32) -> Self {
+        Self {
+            color,
+            transparency,
+        }
+    }
+
+    pub const fn not_transparent(color: C) -> Self {
+        Self {
+            color,
+            transparency: 0.0,
+        }
+    }
+
+    pub fn is_opaque(&self) -> bool {
+        self.transparency == 0.0
+    }
+}
+
+impl<C: CanTween> CanTween for TransparentColor<C> {
+    fn ease(from: Self, to: Self, time: impl Float) -> Self {
+        let color = C::ease(from.color, to.color, time);
+        let transparency = f32::ease(from.transparency, to.transparency, time);
+        Self {
+            color,
+            transparency,
+        }
+    }
+}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Color {
