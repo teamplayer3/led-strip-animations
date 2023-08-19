@@ -126,13 +126,13 @@ impl SingleColor {
 
 #[derive(Debug)]
 pub struct ColorCache {
-    single_color_cache: Option<Box<SingleColor>>,
+    multi_color_cache: Option<Vec<Box<SingleColor>>>,
 }
 
 impl ColorCache {
     pub fn new() -> Self {
         Self {
-            single_color_cache: None,
+            multi_color_cache: None,
         }
     }
 }
@@ -142,46 +142,60 @@ impl ColorCache {
     /// the color which is already cached as a `Some`.
     pub fn cache_color(&mut self, led_id: LedId, color: &HSVColor) -> Option<HSVColor> {
         self.init(color);
-        if let Some(cache) = self.single_color_cache.as_mut() {
-            if cache.contains_led_id(led_id) {
-                Some(cache.color)
-            } else {
-                cache.cache_led(led_id);
-                None
-            }
-        } else {
-            unreachable!()
-        }
-    }
 
-    pub fn load_color(&self, led_id: LedId) -> Option<HSVColor> {
-        if let Some(cache) = self.single_color_cache.as_ref() {
-            if cache.contains_led_id(led_id) {
-                Some(cache.color)
-            } else {
-                None
-            }
-        } else {
-            unreachable!()
-        }
-    }
+        let cache = self.multi_color_cache.as_mut().unwrap();
+        let single_cache = cache.iter_mut().find(|s| s.color == *color);
 
-    pub fn remove_cache(&mut self, led_id: LedId) -> Option<HSVColor> {
-        if let Some(cache) = self.single_color_cache.as_mut() {
-            let removed_some_cache = cache.uncache_led(led_id);
-            if removed_some_cache {
-                Some(cache.color)
+        if let Some(single_cache) = single_cache {
+            if single_cache.contains_led_id(led_id) {
+                Some(single_cache.color)
             } else {
+                single_cache.cache_led(led_id);
                 None
             }
         } else {
+            drop(single_cache);
+
+            let mut single_cache = SingleColor::new(*color);
+            single_cache.cache_led(led_id);
+            cache.push(Box::new(single_cache));
+
             None
         }
     }
 
+    pub fn load_color(&self, led_id: LedId) -> Option<HSVColor> {
+        if let Some(cache) = self.multi_color_cache.as_ref() {
+            for single_cache in cache {
+                if single_cache.contains_led_id(led_id) {
+                    return Some(single_cache.color);
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn remove_cache(&mut self, led_id: LedId) -> Option<HSVColor> {
+        if let Some(cache) = self.multi_color_cache.as_mut() {
+            for single_cache in cache {
+                let removed_some_cache = single_cache.uncache_led(led_id);
+                if removed_some_cache {
+                    return Some(single_cache.color);
+                }
+            }
+        }
+
+        None
+    }
+
     pub fn cache_size(&self) -> usize {
-        if let Some(cache) = self.single_color_cache.as_ref() {
-            cache.cached_size()
+        if let Some(cache) = self.multi_color_cache.as_ref() {
+            cache
+                .iter()
+                .map(|v| v.cached_size())
+                .reduce(|a, b| a + b)
+                .unwrap_or_default()
         } else {
             0
         }
@@ -190,35 +204,20 @@ impl ColorCache {
     // fn change_cache_strategy(&mut self) {}
 
     fn init(&mut self, color: &HSVColor) {
-        match self.single_color_cache {
-            None => self.single_color_cache = Some(Box::new(SingleColor::new(*color))),
-            Some(_) => (),
+        if self.multi_color_cache.is_none() {
+            self.multi_color_cache = Some(alloc::vec![Box::new(SingleColor::new(*color))]);
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use core::{mem::size_of_val, ops::Deref};
 
     use assert_matches::assert_matches;
 
     use crate::color::HSVColor;
 
     use super::*;
-
-    #[test]
-    fn test_cache_obj_size() {
-        let mut color_cache = ColorCache::new();
-        assert_eq!(size_of_val(&color_cache), 8);
-
-        color_cache.cache_color(4, &HSVColor::new(100, 0, 100));
-        assert_eq!(size_of_val(&color_cache), 8);
-        assert_eq!(
-            size_of_val(&color_cache.single_color_cache.unwrap().deref()),
-            8
-        )
-    }
 
     #[test]
     fn test_cache_single_color_single_led() {

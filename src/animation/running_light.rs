@@ -3,89 +3,20 @@ use core::{cell::RefCell, ops::Range};
 use alloc::{boxed::Box, rc::Rc};
 
 use crate::{
-    color::{HSVColor, LedColoring},
+    color::{blend_colors, BlendMode, HSVColor, LedColoring},
     color_cache::ColorCache,
-    curve::{calculate_with_curve, Curve},
     indexing::{Index, Indexing, LedId},
+    pattern::{Pattern, Progress},
     strip::Strip,
     timeline::{Tick, Ticks},
 };
 
-use super::{Animation, AnimationMeta, FromColoring};
+use super::{Animation, AnimationMeta};
 
 #[derive(Debug, Clone, Copy)]
-pub enum AnimationType {
-    /// Color after animation, fade len
-    FadeToColor(FadeToAnimationMeta),
-    Hilled(HilledAnimationMeta),
-}
-
-impl AnimationType {
-    fn animation_len(&self) -> u16 {
-        match self {
-            AnimationType::Hilled(meta) => meta.animation_len(),
-            AnimationType::FadeToColor(meta) => meta.animation_len(),
-        }
-    }
-
-    #[allow(unused)]
-    fn static_len(&self) -> u16 {
-        match self {
-            AnimationType::Hilled(_) => 3,
-            AnimationType::FadeToColor(_) => 2,
-        }
-    }
-}
-
-// #[derive(Debug, Clone, Copy)]
-// pub struct StepAnimationMeta {
-//     reverse: bool,
-//     curve: Curve,
-// }
-
-#[derive(Debug, Clone, Copy)]
-pub struct AnimationPart {
-    curve: Curve,
-    fade_len: u16,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum AnimationSymmetry {
-    /// Animation Curve, fade len
-    Symmetric(Curve, u16),
-    /// Animation starting part, end part
-    Asymmetric(AnimationPart, AnimationPart),
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct FadeToAnimationMeta {
-    pub to_color: HSVColor,
-    pub fade_len: u16,
-    pub curve: Curve,
-}
-
-impl FadeToAnimationMeta {
-    fn animation_len(&self) -> u16 {
-        self.fade_len + 2
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct HilledAnimationMeta {
-    pub symmetry: AnimationSymmetry,
-    pub peak_len: u16,
-    pub peak_color: HSVColor,
-}
-
-impl HilledAnimationMeta {
-    fn animation_len(&self) -> u16 {
-        let fade = match self.symmetry {
-            AnimationSymmetry::Asymmetric(p1, p2) => p1.fade_len + p2.fade_len,
-            AnimationSymmetry::Symmetric(_, f) => f * 2,
-        };
-
-        fade + 2 + self.peak_len
-    }
+pub enum AnimationLen {
+    FullStretch,
+    Static(u16),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -97,48 +28,51 @@ enum BorderType {
 }
 
 #[derive(Debug)]
-pub struct RunningLight<I> {
+pub struct RunningLight<I, P> {
     duration: Ticks,
     range: I,
-    from_color: FromColoring,
     start_offset: i16,
-    animation: AnimationType,
+    pattern: P,
+    len: AnimationLen,
     border_wrapping: BorderType,
     fade_cache: Option<Rc<RefCell<ColorCache>>>,
+    blend_mode: BlendMode,
 }
 
-impl<I> RunningLight<I> {
+impl<I, P: Pattern> RunningLight<I, P> {
     pub fn new(
         duration: Ticks,
         range: I,
-        from_color: FromColoring,
+        pattern: P,
+        len: AnimationLen,
         start_offset: i16,
         circle: bool,
-        animation: AnimationType,
+        blend_mode: BlendMode,
     ) -> Self {
-        let fade_cache = match from_color {
-            FromColoring::Dynamic => Some(Rc::new(RefCell::new(ColorCache::new()))),
-            FromColoring::Fixed(_) => None,
-        };
+        // TODO: init only if needed
+        let fade_cache = Some(Rc::new(RefCell::new(ColorCache::new())));
+
         Self {
             fade_cache,
             duration,
             range,
-            from_color,
+            pattern,
+            len,
             start_offset,
-            animation,
             border_wrapping: match circle {
                 true => BorderType::WrappingStartEnd,
                 false => BorderType::ClosedStartEnd,
             },
+            blend_mode,
         }
     }
 }
 
-impl<S, I> Animation<S> for RunningLight<I>
+impl<S, I, P> Animation<S> for RunningLight<I, P>
 where
     I: Indexing + Clone + 'static,
     S: Strip + 'static,
+    P: Pattern<Color = HSVColor> + Clone + 'static,
 {
     fn animate(
         &self,
@@ -146,7 +80,10 @@ where
         strip: Rc<RefCell<S>>,
         _: &AnimationMeta,
     ) -> Box<dyn Iterator<Item = LedColoring<HSVColor>>> {
-        let animation_len = self.animation.animation_len();
+        let animation_len = match self.len {
+            AnimationLen::FullStretch => self.range.len() as u16,
+            AnimationLen::Static(len) => len,
+        };
         let jumps = calc_animation_jumps(&self.range, animation_len, self.border_wrapping);
         let act_jump = scale_time_to_jump(animation_tick, self.duration, jumps, self.start_offset);
         let start_led_id = scale_jump_to_animation_start(animation_len, act_jump);
@@ -163,9 +100,10 @@ where
                 strip,
                 animation_iter,
                 self.range.clone(),
-                self.animation.clone(),
+                self.pattern.clone(),
+                animation_len,
                 self.fade_cache.clone(),
-                self.from_color,
+                self.blend_mode,
             )
             .flatten(),
         )
@@ -214,42 +152,45 @@ impl AnchoredRange {
     }
 }
 
-pub struct CurveBatchIterator<I, S> {
+pub struct CurveBatchIterator<I, S, P> {
     index: u16,
     animation_iter: ActiveRangeIter,
     actual_animation_part: Option<AnchoredRange>,
     animation_part_item_idx: Option<u16>,
-    animation: AnimationType,
+    pattern: P,
+    animation_len: u16,
     animation_range: I,
-    from_color: FromColoring,
     led_controller: Rc<RefCell<S>>,
     fade_cache: Option<Rc<RefCell<ColorCache>>>,
+    blend_mode: BlendMode,
 }
 
-impl<I, S> CurveBatchIterator<I, S> {
+impl<I, S, P> CurveBatchIterator<I, S, P> {
     fn new(
         led_controller: Rc<RefCell<S>>,
         animation_iter: ActiveRangeIter,
         animation_range: I,
-        animation: AnimationType,
+        pattern: P,
+        animation_len: u16,
         fade_cache: Option<Rc<RefCell<ColorCache>>>,
-        from_color: FromColoring,
+        blend_mode: BlendMode,
     ) -> Self {
         Self {
             index: 0,
             animation_iter,
             actual_animation_part: None,
-            animation,
+            pattern,
+            animation_len,
             animation_range,
             led_controller,
             animation_part_item_idx: None,
             fade_cache,
-            from_color,
+            blend_mode,
         }
     }
 }
 
-impl<I, S> CurveBatchIterator<I, S> {
+impl<I, S, P> CurveBatchIterator<I, S, P> {
     fn update_current_iter_state(&mut self) -> Option<(Anchor, LedId)> {
         loop {
             match self.actual_animation_part.take() {
@@ -285,11 +226,11 @@ impl<I, S> CurveBatchIterator<I, S> {
     }
 }
 
-impl<I, S> Iterator for CurveBatchIterator<I, S>
+impl<I, S, P: Clone> Iterator for CurveBatchIterator<I, S, P>
 where
     I: Indexing,
 {
-    type Item = FadeIter<<I as Indexing>::OutputIndex, S>;
+    type Item = FadeIter<<I as Indexing>::OutputIndex, S, P>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let current_state = self.update_current_iter_state();
@@ -303,12 +244,13 @@ where
             .expect("Led index out of range");
 
         let ret = FadeIter {
-            animation: self.animation,
             animation_led_index: led_idx,
             fade_cache: self.fade_cache.clone(),
-            from_color: self.from_color,
             inner_iter: led_final_idx,
             led_controller: self.led_controller.clone(),
+            pattern: self.pattern.clone(),
+            animation_len: self.animation_len.clone(),
+            blend_mode: self.blend_mode.clone(),
         };
         self.index += 1;
 
@@ -316,18 +258,20 @@ where
     }
 }
 
-pub struct FadeIter<I, S> {
+pub struct FadeIter<I, S, P> {
     inner_iter: I,
     animation_led_index: LedId,
     led_controller: Rc<RefCell<S>>,
     fade_cache: Option<Rc<RefCell<ColorCache>>>,
-    from_color: FromColoring,
-    animation: AnimationType,
+    pattern: P,
+    animation_len: u16,
+    blend_mode: BlendMode,
 }
 
-impl<I, S> FadeIter<I, S>
+impl<I, S, P> FadeIter<I, S, P>
 where
     S: Strip,
+    P: Pattern<Color = HSVColor>,
 {
     fn cache_led_color(&self, fade_cache: &Rc<RefCell<ColorCache>>, general_idx: LedId) {
         let _ = fade_cache.borrow_mut().cache_color(
@@ -345,60 +289,19 @@ where
             self.cache_led_color(cache, general_idx);
         }
 
-        let from_color = match self.from_color {
-            FromColoring::Dynamic => self
-                .fade_cache
-                .as_ref()
-                .unwrap()
-                .borrow()
-                .load_color(general_idx)
-                .unwrap(),
-            FromColoring::Fixed(color) => color,
-        };
-        let new_color = match self.animation {
-            AnimationType::FadeToColor(meta) => calculate_with_curve(
-                &meta.curve,
-                Ticks::from(meta.fade_len + 1),
-                &from_color,
-                &meta.to_color,
-                Tick::from(self.animation.animation_len() - 1 - idx),
-            ),
-            AnimationType::Hilled(meta) => {
-                let (front_fade, front_curve, back_fade, back_curve) = match meta.symmetry {
-                    AnimationSymmetry::Symmetric(curve, fade_len) => {
-                        (fade_len, curve, fade_len, curve)
-                    }
-                    AnimationSymmetry::Asymmetric(first_part, second_part) => (
-                        first_part.fade_len,
-                        first_part.curve,
-                        second_part.fade_len,
-                        second_part.curve,
-                    ),
-                };
+        let animation_color = self.pattern.color_at(Progress::new(
+            self.animation_len - idx - 1,
+            self.animation_len,
+        ));
 
-                let end_section = idx <= back_fade + 1;
-                let first_section = idx >= meta.animation_len() - (front_fade + 1);
+        let from_color = self
+            .fade_cache
+            .as_ref()
+            .and_then(|c| Some(c.borrow().load_color(general_idx).unwrap()));
 
-                if first_section {
-                    calculate_with_curve(
-                        &back_curve,
-                        Ticks::from(front_fade + 1),
-                        &meta.peak_color,
-                        &from_color,
-                        Tick::from(idx - (self.animation.animation_len() - (front_fade + 1) - 1)),
-                    )
-                } else if end_section {
-                    calculate_with_curve(
-                        &front_curve,
-                        Ticks::from(back_fade + 1),
-                        &from_color,
-                        &meta.peak_color,
-                        Tick::from(idx),
-                    )
-                } else {
-                    meta.peak_color
-                }
-            }
+        let new_color = match from_color {
+            Some(from) => blend_colors(from, animation_color, self.blend_mode),
+            None => animation_color.color,
         };
 
         if let Some(cache) = self.fade_cache.as_ref() {
@@ -411,10 +314,11 @@ where
     }
 }
 
-impl<I, S> Iterator for FadeIter<I, S>
+impl<I, S, P> Iterator for FadeIter<I, S, P>
 where
     I: ExactSizeIterator<Item = Index>,
     S: Strip,
+    P: Pattern<Color = HSVColor>,
 {
     type Item = LedColoring<HSVColor>;
 
@@ -561,20 +465,15 @@ mod test {
     use assert_matches::assert_matches;
 
     use crate::{
-        animation::{
-            running_light::{
-                ActiveRangeIter, AnimationSymmetry, AnimationType, BorderType, RunningLight,
-            },
-            testing::{AnimationTester, Iterations},
-            FromColoring,
-        },
-        color::HSVColor,
+        animation::testing::{AnimationTester, Iterations},
+        color::{HSVColor, TransparentColor},
         curve::{calculate_with_curve, Curve},
         mock::SPI,
+        pattern::HillPattern,
         strip::mock::LedStrip,
     };
 
-    use super::{FadeToAnimationMeta, HilledAnimationMeta};
+    use super::*;
 
     #[test]
     fn test_indexed_range_iter_closed_start_end() {
@@ -649,24 +548,122 @@ mod test {
         );
     }
 
+    // #[test]
+    // fn test_animate_running_light_fade_to() {
+    //     let led_controller = Rc::new(RefCell::new(LedStrip::<SPI, 20>::new()));
+    //     let range = 6u16..10;
+    //     let duration = 40;
+    //     let animation = AnimationType::FadeToColor(FadeToAnimationMeta {
+    //         curve: Curve::Linear,
+    //         fade_len: 1,
+    //         to_color: HSVColor::new(100, 0, 0),
+    //     });
+
+    //     let animation = RunningLight::new(
+    //         duration,
+    //         range,
+    //         FromColoring::Fixed(HSVColor::new(0, 0, 0)),
+    //         0,
+    //         false,
+    //         animation,
+    //     );
+    //     let mut animation_tester =
+    //         AnimationTester::new(animation, Iterations::Single, led_controller);
+
+    //     animation_tester.assert_state(0, [(6, HSVColor::new(0, 0, 0))]);
+
+    //     animation_tester.assert_state(
+    //         8,
+    //         [(6, HSVColor::new(50, 0, 0)), (7, HSVColor::new(0, 0, 0))],
+    //     );
+
+    //     animation_tester.assert_state(
+    //         16,
+    //         [
+    //             (6, HSVColor::new(100, 0, 0)),
+    //             (7, HSVColor::new(50, 0, 0)),
+    //             (8, HSVColor::new(0, 0, 0)),
+    //         ],
+    //     );
+
+    //     animation_tester.assert_state(
+    //         32,
+    //         [(8, HSVColor::new(100, 0, 0)), (9, HSVColor::new(50, 0, 0))],
+    //     );
+
+    //     animation_tester.assert_state(40, [(9, HSVColor::new(100, 0, 0))]);
+    // }
+
+    // #[test]
+    // fn test_animate_running_light_fade_to_wrapped() {
+    //     let led_controller = Rc::new(RefCell::new(LedStrip::<SPI, 20>::new()));
+    //     let range = 6u16..10;
+    //     let duration = 40;
+    //     let animation = AnimationType::FadeToColor(FadeToAnimationMeta {
+    //         curve: Curve::Linear,
+    //         fade_len: 1,
+    //         to_color: HSVColor::new(100, 0, 0),
+    //     });
+
+    //     let animation = RunningLight::new(
+    //         duration,
+    //         range,
+    //         FromColoring::Fixed(HSVColor::new(0, 0, 0)),
+    //         0,
+    //         true,
+    //         animation,
+    //     );
+    //     let mut animation_tester =
+    //         AnimationTester::new(animation, Iterations::Single, led_controller);
+
+    //     animation_tester.assert_state(
+    //         0,
+    //         [
+    //             (8, HSVColor::new(100, 0, 0)),
+    //             (9, HSVColor::new(50, 0, 0)),
+    //             (6, HSVColor::new(0, 0, 0)),
+    //         ],
+    //     );
+
+    //     animation_tester.assert_state(
+    //         14,
+    //         [
+    //             (9, HSVColor::new(100, 0, 0)),
+    //             (6, HSVColor::new(50, 0, 0)),
+    //             (7, HSVColor::new(0, 0, 0)),
+    //         ],
+    //     );
+
+    //     animation_tester.assert_state(
+    //         40,
+    //         [
+    //             (7, HSVColor::new(100, 0, 0)),
+    //             (8, HSVColor::new(50, 0, 0)),
+    //             (9, HSVColor::new(0, 0, 0)),
+    //         ],
+    //     );
+    // }
+
     #[test]
-    fn test_animate_running_light_fade_to() {
+    fn test_animate_running_light_hilled() {
         let led_controller = Rc::new(RefCell::new(LedStrip::<SPI, 20>::new()));
         let range = 6u16..10;
         let duration = 40;
-        let animation = AnimationType::FadeToColor(FadeToAnimationMeta {
-            curve: Curve::Linear,
-            fade_len: 1,
-            to_color: HSVColor::new(100, 0, 0),
-        });
+
+        let pattern = HillPattern::new(
+            1,
+            TransparentColor::opaque(HSVColor::new(100, 100, 100)),
+            Curve::Linear,
+        );
 
         let animation = RunningLight::new(
             duration,
             range,
-            FromColoring::Fixed(HSVColor::new(0, 0, 0)),
+            pattern,
+            AnimationLen::Static(5),
             0,
             false,
-            animation,
+            BlendMode::AllChannels,
         );
         let mut animation_tester =
             AnimationTester::new(animation, Iterations::Single, led_controller);
@@ -675,128 +672,28 @@ mod test {
 
         animation_tester.assert_state(
             8,
-            [(6, HSVColor::new(50, 0, 0)), (7, HSVColor::new(0, 0, 0))],
+            [(6, HSVColor::new(50, 50, 50)), (7, HSVColor::new(0, 0, 0))],
         );
 
         animation_tester.assert_state(
             16,
             [
-                (6, HSVColor::new(100, 0, 0)),
-                (7, HSVColor::new(50, 0, 0)),
+                (6, HSVColor::new(100, 100, 100)),
+                (7, HSVColor::new(50, 50, 50)),
                 (8, HSVColor::new(0, 0, 0)),
             ],
         );
 
         animation_tester.assert_state(
             32,
-            [(8, HSVColor::new(100, 0, 0)), (9, HSVColor::new(50, 0, 0))],
-        );
-
-        animation_tester.assert_state(40, [(9, HSVColor::new(100, 0, 0))]);
-    }
-
-    #[test]
-    fn test_animate_running_light_fade_to_wrapped() {
-        let led_controller = Rc::new(RefCell::new(LedStrip::<SPI, 20>::new()));
-        let range = 6u16..10;
-        let duration = 40;
-        let animation = AnimationType::FadeToColor(FadeToAnimationMeta {
-            curve: Curve::Linear,
-            fade_len: 1,
-            to_color: HSVColor::new(100, 0, 0),
-        });
-
-        let animation = RunningLight::new(
-            duration,
-            range,
-            FromColoring::Fixed(HSVColor::new(0, 0, 0)),
-            0,
-            true,
-            animation,
-        );
-        let mut animation_tester =
-            AnimationTester::new(animation, Iterations::Single, led_controller);
-
-        animation_tester.assert_state(
-            0,
             [
-                (8, HSVColor::new(100, 0, 0)),
-                (9, HSVColor::new(50, 0, 0)),
-                (6, HSVColor::new(0, 0, 0)),
-            ],
-        );
-
-        animation_tester.assert_state(
-            14,
-            [
-                (9, HSVColor::new(100, 0, 0)),
-                (6, HSVColor::new(50, 0, 0)),
                 (7, HSVColor::new(0, 0, 0)),
+                (8, HSVColor::new(50, 50, 50)),
+                (9, HSVColor::new(100, 100, 100)),
             ],
         );
 
-        animation_tester.assert_state(
-            40,
-            [
-                (7, HSVColor::new(100, 0, 0)),
-                (8, HSVColor::new(50, 0, 0)),
-                (9, HSVColor::new(0, 0, 0)),
-            ],
-        );
-    }
-
-    #[test]
-    fn test_animate_running_light_hilled() {
-        let led_controller = Rc::new(RefCell::new(LedStrip::<SPI, 20>::new()));
-        let range = 6u16..10;
-        let duration = 40;
-        let animation = AnimationType::Hilled(HilledAnimationMeta {
-            peak_color: HSVColor::new(100, 0, 100),
-            peak_len: 2,
-            symmetry: AnimationSymmetry::Symmetric(Curve::Linear, 1),
-        });
-
-        let animation = RunningLight::new(
-            duration,
-            range,
-            FromColoring::Fixed(HSVColor::new(0, 0, 0)),
-            0,
-            false,
-            animation,
-        );
-        let mut animation_tester =
-            AnimationTester::new(animation, Iterations::Single, led_controller);
-
-        animation_tester.assert_state(0, [(6, HSVColor::new(100, 0, 0))]);
-
-        animation_tester.assert_state(
-            8,
-            [
-                (6, HSVColor::new(100, 0, 50)),
-                (7, HSVColor::new(100, 0, 0)),
-            ],
-        );
-
-        animation_tester.assert_state(
-            16,
-            [
-                (6, HSVColor::new(100, 0, 100)),
-                (7, HSVColor::new(100, 0, 100)),
-                (8, HSVColor::new(100, 0, 50)),
-                (9, HSVColor::new(100, 0, 0)),
-            ],
-        );
-
-        animation_tester.assert_state(
-            32,
-            [
-                (7, HSVColor::new(100, 0, 0)),
-                (8, HSVColor::new(100, 0, 50)),
-                (9, HSVColor::new(100, 0, 100)),
-            ],
-        );
-
-        animation_tester.assert_state(40, [(9, HSVColor::new(100, 0, 0))]);
+        animation_tester.assert_state(40, [(9, HSVColor::new(0, 0, 0))]);
     }
 
     // #[test]

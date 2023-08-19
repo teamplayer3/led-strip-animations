@@ -310,8 +310,7 @@ impl<I: Indexing<OutputIndex = SingleIndexed>> Indexing for SplitMirroredIndexed
         if indexed_len % 2 != 0 {
             match self.1 {
                 UnevenBehavior::Exclude => indexed_len / 2,
-                UnevenBehavior::ToLower => (indexed_len + 1) / 2,
-                UnevenBehavior::ToUpper => (indexed_len + 1) / 2,
+                UnevenBehavior::ToUpper | UnevenBehavior::ToLower => (indexed_len + 1) / 2,
             }
         } else {
             indexed_len / 2

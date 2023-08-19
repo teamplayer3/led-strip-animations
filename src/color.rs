@@ -1,5 +1,6 @@
 use core::{
     cmp::max,
+    fmt::Debug,
     ops::{Add, Index, IndexMut, Mul, Sub},
 };
 
@@ -17,16 +18,78 @@ use crate::{
 
 const MAX_RGB_VALUE: u8 = 255;
 
+/// Trait for extending the functionality of [Spectrum].
+pub trait SpectrumExt {
+    fn map<F>(self, mapping: F) -> MappedColor<Self, F>
+    where
+        Self: Sized,
+        F: Fn(f32, &mut HSVColor, &mut f32);
+
+    fn darken(self, amount: u8) -> DarkenedSpectrum<Self>
+    where
+        Self: Sized;
+}
+
+impl<S> SpectrumExt for S
+where
+    S: Spectrum<Color = HSVColor> + Sized,
+{
+    fn map<F>(self, mapping: F) -> MappedColor<Self, F>
+    where
+        F: Fn(f32, &mut HSVColor, &mut f32),
+    {
+        MappedColor {
+            color: self,
+            mapping,
+        }
+    }
+
+    fn darken(self, amount: u8) -> DarkenedSpectrum<Self>
+    where
+        Self: Sized,
+    {
+        DarkenedSpectrum(self, amount)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DarkenedSpectrum<S>(S, u8);
+
+impl<S: Spectrum<Color = C>, C: ColorExt> Spectrum for DarkenedSpectrum<S> {
+    type Color = C;
+
+    fn color_at(&self, percentage: f32) -> TransparentColor<Self::Color> {
+        let mut c = self.0.color_at(percentage);
+        c.color = c.color.darken(self.1);
+        c
+    }
+
+    fn is_transparent(&self) -> bool {
+        self.0.is_transparent()
+    }
+}
+
 pub trait Spectrum {
     type Color;
 
     /// Returns the color at the given percentage (0.0 - 1.0) of the spectrum.
     fn color_at(&self, percentage: f32) -> TransparentColor<Self::Color>;
+
+    fn is_transparent(&self) -> bool;
+
+    fn first_color(&self) -> TransparentColor<Self::Color> {
+        self.color_at(0.0)
+    }
+
+    fn last_color(&self) -> TransparentColor<Self::Color> {
+        self.color_at(1.0)
+    }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct PeakSpectrum {
     pub from_color: TransparentColor<HSVColor>,
-    pub to_color: TransparentColor<HSVColor>,
+    pub peak_color: TransparentColor<HSVColor>,
     pub curve: Curve,
 }
 
@@ -35,20 +98,122 @@ impl Spectrum for PeakSpectrum {
 
     fn color_at(&self, percentage: f32) -> TransparentColor<Self::Color> {
         let (from_c, to_c, p) = if percentage < 0.5 {
-            (&self.from_color, &self.to_color, percentage)
+            (&self.from_color, &self.peak_color, percentage / 0.5)
         } else {
-            (&self.to_color, &self.from_color, 1.0 - percentage)
+            (
+                &self.peak_color,
+                &self.from_color,
+                1.0 - ((1.0 - percentage) / 0.5),
+            )
         };
 
         let color = calculate_with_curve_percentage(&self.curve, from_c, to_c, p);
         color
     }
+
+    fn is_transparent(&self) -> bool {
+        !self.from_color.is_opaque() || !self.peak_color.is_opaque()
+    }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RainbowSpectrum {
+    pub from_color: TransparentColor<HSVColor>,
+    pub to_color: TransparentColor<HSVColor>,
+}
+
+impl RainbowSpectrum {
+    pub fn new(
+        from_color: impl Into<TransparentColor<HSVColor>>,
+        to_color: impl Into<TransparentColor<HSVColor>>,
+    ) -> Self {
+        Self {
+            from_color: from_color.into(),
+            to_color: to_color.into(),
+        }
+    }
+}
+
+impl Spectrum for RainbowSpectrum {
+    type Color = HSVColor;
+
+    fn color_at(&self, percentage: f32) -> TransparentColor<Self::Color> {
+        let color = calculate_with_curve_percentage(
+            &Curve::Linear,
+            &self.from_color,
+            &self.to_color,
+            percentage,
+        );
+        color
+    }
+
+    fn is_transparent(&self) -> bool {
+        !self.from_color.is_opaque() || !self.to_color.is_opaque()
+    }
+}
+
+pub struct MappedColor<C, F> {
+    color: C,
+    mapping: F,
+}
+
+impl<F> PartialEq<TransparentColor<HSVColor>> for MappedColor<TransparentColor<HSVColor>, F>
+where
+    F: Fn(f32, &mut HSVColor, &mut f32),
+{
+    fn eq(&self, other: &TransparentColor<HSVColor>) -> bool {
+        let mut color = self.color.clone();
+        (self.mapping)(0.0, &mut color.color, &mut color.transparency);
+
+        color.color == other.color && color.transparency == other.transparency
+    }
+}
+
+impl<F> Debug for MappedColor<TransparentColor<HSVColor>, F>
+where
+    F: Fn(f32, &mut HSVColor, &mut f32),
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut color = self.color.clone();
+        (self.mapping)(0.0, &mut color.color, &mut color.transparency);
+
+        f.debug_struct("Mapping")
+            .field("from", &self.color)
+            .field("to", &color)
+            .finish()
+    }
+}
+
+impl<F> Spectrum for MappedColor<TransparentColor<HSVColor>, F>
+where
+    F: Fn(f32, &mut HSVColor, &mut f32),
+{
+    type Color = HSVColor;
+
+    fn color_at(&self, percentage: f32) -> TransparentColor<Self::Color> {
+        let mut color = self.color;
+        (self.mapping)(percentage, &mut color.color, &mut color.transparency);
+        color
+    }
+
+    fn is_transparent(&self) -> bool {
+        !self.color.is_opaque()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransparentColor<C> {
     pub color: C,
     pub transparency: f32,
+}
+
+impl<C: Default> TransparentColor<C> {
+    pub fn full_transparent() -> Self {
+        Self {
+            color: C::default(),
+            transparency: 1.0,
+        }
+    }
 }
 
 impl<C> TransparentColor<C> {
@@ -59,7 +224,7 @@ impl<C> TransparentColor<C> {
         }
     }
 
-    pub const fn not_transparent(color: C) -> Self {
+    pub const fn opaque(color: C) -> Self {
         Self {
             color,
             transparency: 0.0,
@@ -71,6 +236,77 @@ impl<C> TransparentColor<C> {
     }
 }
 
+impl From<HSVColor> for TransparentColor<HSVColor> {
+    fn from(value: HSVColor) -> Self {
+        Self::new(value, 0.0)
+    }
+}
+
+impl From<Color> for TransparentColor<Color> {
+    fn from(value: Color) -> Self {
+        Self::new(value, 0.0)
+    }
+}
+
+impl<C> Spectrum for TransparentColor<C>
+where
+    C: Clone,
+{
+    type Color = C;
+
+    fn color_at(&self, _: f32) -> TransparentColor<Self::Color> {
+        self.clone()
+    }
+
+    fn is_transparent(&self) -> bool {
+        !self.is_opaque()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BlendMode {
+    // interpolates linearly between the two colors
+    AllChannels,
+    // interpolates linearly between the two colors, but only for the value channel
+    ValueOnly,
+}
+
+impl Default for BlendMode {
+    fn default() -> Self {
+        Self::AllChannels
+    }
+}
+
+pub fn blend_colors(
+    color: HSVColor,
+    transparent_color: TransparentColor<HSVColor>,
+    mode: BlendMode,
+) -> HSVColor {
+    let base_color = color;
+    let transparency = 1.0 - transparent_color.transparency;
+    let blend_color = transparent_color.color;
+
+    let h = match mode {
+        BlendMode::AllChannels => {
+            (blend_color.h as f32 * transparency + base_color.h as f32 * (1.0 - transparency))
+                as u16
+        }
+        BlendMode::ValueOnly => blend_color.h,
+    };
+
+    let s = match mode {
+        BlendMode::AllChannels => {
+            (blend_color.s as f32 * transparency + base_color.s as f32 * (1.0 - transparency)) as u8
+        }
+        BlendMode::ValueOnly => blend_color.s,
+    };
+
+    let v =
+        (blend_color.v as f32 * transparency + base_color.v as f32 * (1.0 - transparency)) as u8;
+
+    HSVColor { h, s, v }
+}
+
 impl<C: CanTween> CanTween for TransparentColor<C> {
     fn ease(from: Self, to: Self, time: impl Float) -> Self {
         let color = C::ease(from.color, to.color, time);
@@ -80,6 +316,16 @@ impl<C: CanTween> CanTween for TransparentColor<C> {
             transparency,
         }
     }
+}
+
+pub trait ColorExt {
+    fn with_transparency(self, transparency: f32) -> TransparentColor<Self>
+    where
+        Self: Sized;
+
+    fn darken(self, amount: u8) -> Self;
+
+    fn brighten(self, amount: u8) -> Self;
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -140,6 +386,10 @@ impl Color {
             g: MAX_RGB_VALUE,
             b: MAX_RGB_VALUE,
         }
+    }
+
+    pub const fn with_transparency(self, transparency: f32) -> TransparentColor<Self> {
+        TransparentColor::new(self, transparency)
     }
 }
 
@@ -253,6 +503,20 @@ impl IndexMut<u8> for Color {
     }
 }
 
+impl ColorExt for Color {
+    fn with_transparency(self, transparency: f32) -> TransparentColor<Self> {
+        TransparentColor::new(self, transparency)
+    }
+
+    fn darken(self, amount: u8) -> Self {
+        HSVColor::from(self).darken(amount).into()
+    }
+
+    fn brighten(self, amount: u8) -> Self {
+        HSVColor::from(self).brighten(amount).into()
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct HSVColor {
     pub h: u16,
@@ -261,11 +525,43 @@ pub struct HSVColor {
 }
 
 impl HSVColor {
-    pub fn new(h: u16, s: u8, v: u8) -> Self {
+    pub const fn new(h: u16, s: u8, v: u8) -> Self {
         assert!(h <= 360, "hue must be in range 0..=360");
         assert!(s <= 100, "saturation must be in range 0..=100");
         assert!(v <= 100, "value must be in range 0..=100");
         Self { h, s, v }
+    }
+
+    pub const fn red() -> Self {
+        Self {
+            h: 0,
+            s: 100,
+            v: 100,
+        }
+    }
+
+    pub const fn green() -> Self {
+        Self {
+            h: 120,
+            s: 100,
+            v: 100,
+        }
+    }
+
+    pub const fn blue() -> Self {
+        Self {
+            h: 240,
+            s: 100,
+            v: 100,
+        }
+    }
+
+    pub const fn yellow() -> Self {
+        Self {
+            h: 60,
+            s: 100,
+            v: 100,
+        }
     }
 
     pub fn off_from_color(color: Color) -> Self {
@@ -293,6 +589,10 @@ impl HSVColor {
             s: self.s,
             v: new_v,
         }
+    }
+
+    pub const fn with_transparency(self, transparency: f32) -> TransparentColor<Self> {
+        TransparentColor::new(self, transparency)
     }
 }
 
@@ -352,6 +652,35 @@ impl CanTween for HSVColor {
                 100,
             ),
         )
+    }
+}
+
+impl Spectrum for HSVColor {
+    type Color = HSVColor;
+
+    fn color_at(&self, _: f32) -> TransparentColor<Self::Color> {
+        self.clone().into()
+    }
+
+    fn is_transparent(&self) -> bool {
+        false
+    }
+}
+
+impl ColorExt for HSVColor {
+    fn with_transparency(self, transparency: f32) -> TransparentColor<Self>
+    where
+        Self: Sized,
+    {
+        self.with_transparency(transparency)
+    }
+
+    fn darken(self, amount: u8) -> Self {
+        self.darken(amount)
+    }
+
+    fn brighten(self, amount: u8) -> Self {
+        self.brighten(amount)
     }
 }
 
@@ -640,5 +969,56 @@ mod test {
 
         let end = ease_with_scaled_time(functions::Linear, from, to.clone(), 1.0, 2.0);
         assert_eq!(HSVColor::new(0, 100, 50), end)
+    }
+
+    #[test]
+    fn test_spectrum_peak() {
+        let spectrum = PeakSpectrum {
+            curve: Curve::Linear,
+            from_color: TransparentColor::full_transparent(),
+            peak_color: HSVColor::new(100, 0, 0).into(),
+        };
+
+        assert_eq!(spectrum.color_at(0.0), TransparentColor::full_transparent());
+        assert_eq!(
+            spectrum.color_at(0.25),
+            HSVColor::new(50, 0, 0).with_transparency(0.5)
+        );
+        assert_eq!(spectrum.color_at(0.5), HSVColor::new(100, 0, 0).into());
+        assert_eq!(
+            spectrum.color_at(0.75),
+            HSVColor::new(50, 0, 0).with_transparency(0.5)
+        );
+        assert_eq!(spectrum.color_at(1.0), TransparentColor::full_transparent());
+    }
+
+    #[test]
+    fn test_spectrum_rainbow() {
+        let spectrum =
+            RainbowSpectrum::new(HSVColor::new(0, 100, 100), HSVColor::new(100, 100, 100));
+
+        assert_eq!(spectrum.color_at(0.0), HSVColor::new(0, 100, 100).into());
+        assert_eq!(spectrum.color_at(0.25), HSVColor::new(25, 100, 100).into());
+        assert_eq!(spectrum.color_at(0.5), HSVColor::new(50, 100, 100).into());
+        assert_eq!(spectrum.color_at(0.75), HSVColor::new(75, 100, 100).into());
+        assert_eq!(spectrum.color_at(1.0), HSVColor::new(100, 100, 100).into());
+    }
+
+    #[test]
+    fn test_mix_colors() {
+        let base_color = HSVColor::new(0, 100, 100);
+        let transparent_color = HSVColor::new(100, 100, 100).with_transparency(0.5);
+
+        let mixed_color = blend_colors(base_color, transparent_color, BlendMode::AllChannels);
+        assert_eq!(mixed_color, HSVColor::new(50, 100, 100));
+    }
+
+    #[test]
+    fn test_mix_colors_full_transparency() {
+        let base_color = HSVColor::new(0, 0, 0);
+        let transparent_color = HSVColor::new(100, 100, 100).with_transparency(1.0);
+
+        let mixed_color = blend_colors(base_color, transparent_color, BlendMode::AllChannels);
+        assert_eq!(mixed_color, HSVColor::new(0, 0, 0));
     }
 }

@@ -8,6 +8,7 @@ mod color_cache;
 pub mod controller;
 pub mod curve;
 pub mod indexing;
+pub mod pattern;
 pub mod processing;
 pub mod strip;
 pub mod timeline;
