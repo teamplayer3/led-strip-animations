@@ -54,6 +54,18 @@ where
     A: Animation<S>,
     S: Strip,
 {
+    pub fn print_state(&mut self, tick: Tick) {
+        extern crate std;
+        let animation_meta =
+            AnimationMeta::new(self.iterate.as_iteration_state(self.iteration_index));
+        let mut led_iter = self
+            .animation
+            .animate(tick, self.strip.clone(), &animation_meta);
+        while let Some(led_colored) = led_iter.next() {
+            std::println!("{:?}", led_colored);
+        }
+    }
+
     pub fn assert_state<T: IntoIterator<Item = (LedId, HSVColor)>>(
         &mut self,
         tick: Tick,
@@ -65,8 +77,27 @@ where
             .animation
             .animate(tick, self.strip.clone(), &animation_meta);
         for (led_id, color) in should_state {
-            assert_matches!(led_iter.next(), Some(led_colored) if led_colored.led == led_id && led_colored.color == color)
+            let next_led = led_iter.next();
+            match next_led {
+                None => panic!("LED iterate has not the same length as should_state"),
+                Some(led_colored) => {
+                    assert_eq!(
+                        led_colored.led, led_id,
+                        "LED has wrong id: {:?}, should be: {:?}",
+                        led_colored.led, led_id
+                    );
+                    assert_eq!(
+                        led_colored.color, color,
+                        "LED with id {:?} should have color: {:?} but has: {:?}",
+                        led_id, color, led_colored.color,
+                    );
+                }
+            }
         }
-        assert_matches!(led_iter.next(), None)
+        assert_matches!(
+            led_iter.next(),
+            None,
+            "LED iterate has not the same length as should_state"
+        )
     }
 }
